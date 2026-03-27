@@ -1,3 +1,5 @@
+![CI](https://github.com/<your-username>/TW_RealEstate_ETL/actions/workflows/ci.yml/badge.svg)
+
 # TW_RealEstate_ETL
 
 台灣內政部**實價登錄**開放資料自動化 ETL pipeline。
