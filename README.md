@@ -146,7 +146,8 @@ TW_RealEstate_ETL/
 ├── launchd/
 │   └── com.tw-realestate.etl.plist  # macOS LaunchAgent 排程
 ├── claude-skill/
-│   └── SKILL.md              # Claude Code 查詢技能定義
+│   └── tw-realestate-query/
+│       └── SKILL.md          # Claude Code 查詢技能（自動補資料 + SQL 查詢）
 ├── tests/
 │   └── test_transform.py     # 單元測試
 ├── logs/                     # 執行日誌（gitignore）
@@ -227,15 +228,31 @@ cp .env.template .env
 
 ## Claude Code 整合
 
-專案已設定 MCP PostgreSQL Server（`.mcp.json`），在專案目錄下啟動 Claude Code 即可直接用自然語言查詢：
+專案提供 Claude Code Skill，複製到 `~/.claude/skills/` 即可在**任何 repo** 中使用：
 
-```
-> 查詢大安區近兩年的大樓成交行情
-> 台北中正區租金行情
-> 松山區南京東路附近透天厝均價多少
+```bash
+cp -r claude-skill/tw-realestate-query ~/.claude/skills/
 ```
 
-查詢技能定義在 `claude-skill/SKILL.md`，包含 schema 參考、單位換算、排除特殊交易的 SQL 範例等。
+### 設定 `ETL_ROOT`
+
+複製後，編輯 `~/.claude/skills/tw-realestate-query/SKILL.md`，將 `ETL_ROOT` 改為你的專案絕對路徑：
+
+```
+ETL 專案根目錄：`ETL_ROOT=/your/actual/path/to/TW_RealEstate_ETL`
+```
+
+Skill 需要透過此路徑找到 `scripts/run_etl.py` 等腳本，未設定正確路徑將無法執行 ETL 下載。
+
+### `/tw-realestate-query` — 查詢實價登錄
+
+自動檢查資料庫 → 缺資料時從備份還原或下載 → 執行 SQL 查詢：
+
+```
+/tw-realestate-query 臺北市大安區忠孝東路近兩年大樓成交行情
+/tw-realestate-query 臺北市信義區透天厝均價
+/tw-realestate-query 臺北市中山區租金行情
+```
 
 ## 單位換算
 
