@@ -152,12 +152,12 @@ def main():
     parser = argparse.ArgumentParser(
         description="TW RealEstate ETL — Download, transform, load, and backup"
     )
-    group = parser.add_mutually_exclusive_group(required=True)
+    group = parser.add_mutually_exclusive_group()
     group.add_argument("--season", help="Single season, e.g. 113S4")
     group.add_argument("--current", action="store_true", help="Process current period")
     group.add_argument("--backup-only", action="store_true", help="Only run backup, skip ETL")
-    parser.add_argument("--from", dest="from_s", help="Range start, e.g. 112S1")
-    parser.add_argument("--to", dest="to_s", help="Range end, e.g. 114S1")
+    parser.add_argument("--from", dest="from_s", help="Range start, e.g. 112S1 (use with --to)")
+    parser.add_argument("--to", dest="to_s", help="Range end, e.g. 114S1 (use with --from)")
     parser.add_argument("--skip-backup", action="store_true", help="Skip backup after ETL")
     parser.add_argument(
         "--city",
@@ -178,6 +178,14 @@ def main():
             logger.info("City override: %s", config.TARGET_CITY_CODES)
 
     logger.info("TW_RealEstate_ETL started at %s", datetime.now().isoformat())
+
+    # Validate: at least one mode must be specified.
+    if not (args.season or args.current or args.backup_only or (args.from_s and args.to_s)):
+        parser.error("Specify --season, --from/--to, --current, or --backup-only")
+
+    # Validate: --from and --to must be used together.
+    if bool(args.from_s) != bool(args.to_s):
+        parser.error("--from and --to must be used together")
 
     # --- ETL ---
     if not args.backup_only:
