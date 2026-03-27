@@ -93,6 +93,15 @@ python scripts/run_etl.py --season 114S1
 # 批次匯入（範圍）
 python scripts/run_etl.py --from 112S1 --to 114S1
 
+# 指定縣市（覆蓋 config.py 預設值）
+python scripts/run_etl.py --season 114S1 --city J
+
+# 多縣市
+python scripts/run_etl.py --from 111S1 --to 112S4 --city J,H
+
+# 全台
+python scripts/run_etl.py --season 114S1 --city all
+
 # 當期資料
 python scripts/run_etl.py --current
 

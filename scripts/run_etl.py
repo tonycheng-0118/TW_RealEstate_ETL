@@ -8,6 +8,8 @@ CLI usage:
     python scripts/run_etl.py --season 113S4
     python scripts/run_etl.py --from 112S1 --to 114S1
     python scripts/run_etl.py --current
+    python scripts/run_etl.py --season 114S1 --city J      # 指定新竹縣
+    python scripts/run_etl.py --from 111S1 --to 112S4 --city J,H  # 多縣市
     python scripts/run_etl.py --backup-only
 """
 
@@ -157,9 +159,24 @@ def main():
     parser.add_argument("--from", dest="from_s", help="Range start, e.g. 112S1")
     parser.add_argument("--to", dest="to_s", help="Range end, e.g. 114S1")
     parser.add_argument("--skip-backup", action="store_true", help="Skip backup after ETL")
+    parser.add_argument(
+        "--city",
+        help="Override TARGET_CITY_CODES. Comma-separated city codes, e.g. J or A,J,H. "
+             "Use 'all' to download every city. Defaults to config.TARGET_CITY_CODES.",
+    )
     args = parser.parse_args()
 
     setup_logging()
+
+    # Override TARGET_CITY_CODES if --city is provided.
+    if args.city:
+        if args.city.lower() == "all":
+            config.TARGET_CITY_CODES = None
+            logger.info("City override: ALL cities")
+        else:
+            config.TARGET_CITY_CODES = [c.strip().upper() for c in args.city.split(",")]
+            logger.info("City override: %s", config.TARGET_CITY_CODES)
+
     logger.info("TW_RealEstate_ETL started at %s", datetime.now().isoformat())
 
     # --- ETL ---

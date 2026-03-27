@@ -84,7 +84,7 @@ def read_csv_with_encoding(filepath: Path) -> pd.DataFrame:
     last_error = None
     for enc in config.ENCODING_ORDER:
         try:
-            df = pd.read_csv(filepath, dtype=str, encoding=enc)
+            df = pd.read_csv(filepath, dtype=str, encoding=enc, on_bad_lines="skip")
             logger.debug("Read %s with encoding %s (%d rows)", filepath.name, enc, len(df))
             return df
         except (UnicodeDecodeError, UnicodeError) as e:
