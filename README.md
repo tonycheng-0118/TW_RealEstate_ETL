@@ -1,4 +1,4 @@
-![CI](https://github.com/<your-username>/TW_RealEstate_ETL/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/tonycheng-0118/TW_RealEstate_ETL/actions/workflows/ci.yml/badge.svg)
 
 # TW_RealEstate_ETL
 
