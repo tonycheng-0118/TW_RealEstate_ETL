@@ -226,33 +226,56 @@ cp .env.template .env
 | H | 桃園市 | Q | 嘉義縣 | | |
 | I | 嘉義市 | | | | |
 
-## Claude Code 整合
+## Claude Code Skill 安裝
 
-專案提供 Claude Code Skill，複製到 `~/.claude/skills/` 即可在**任何 repo** 中使用：
+本專案提供自包含的 Claude Code Skill，安裝後即可在 Claude Code 中完成所有操作（初始化、ETL、查詢、備份、排程），**不需要 git clone、pip install、npm**。
+
+### 方法一：從 Release 安裝（推薦）
+
+```bash
+# 下載 zip 並解壓到 skills 目錄
+unzip tw-realestate-etl.zip -d ~/.claude/skills/
+
+# 在 Claude Code 中初始化
+/tw-realestate-etl init
+```
+
+### 方法二：從 repo 打包安裝
+
+```bash
+# 在 repo 內打包
+./build_skill.sh
+
+# 複製到 skills 目錄
+cp -r dist/tw-realestate-etl ~/.claude/skills/
+
+# 在 Claude Code 中初始化
+/tw-realestate-etl init
+```
+
+### Skill 使用方式
+
+```
+/tw-realestate-etl help                           顯示所有指令
+/tw-realestate-etl init                           初始化設定
+/tw-realestate-etl run 114S1                      匯入單季
+/tw-realestate-etl run 112S1-114S1 D,A            批次匯入
+/tw-realestate-etl run current                    當期資料
+/tw-realestate-etl query 臺北市大安區忠孝東路近兩年大樓成交行情
+/tw-realestate-etl status                         查看 DB 狀態
+/tw-realestate-etl backup                         手動備份
+/tw-realestate-etl schedule install               安裝排程
+```
+
+### 舊版查詢 Skill（仍可使用）
+
+如果只需要查詢功能，可使用 repo 內的查詢專用 skill：
 
 ```bash
 cp -r claude-skill/tw-realestate-query ~/.claude/skills/
 ```
 
-### 設定 `ETL_ROOT`
-
-複製後，編輯 `~/.claude/skills/tw-realestate-query/SKILL.md`，將 `ETL_ROOT` 改為你的專案絕對路徑：
-
-```
-ETL 專案根目錄：`ETL_ROOT=/your/actual/path/to/TW_RealEstate_ETL`
-```
-
-Skill 需要透過此路徑找到 `scripts/run_etl.py` 等腳本，未設定正確路徑將無法執行 ETL 下載。
-
-### `/tw-realestate-query` — 查詢實價登錄
-
-自動檢查資料庫 → 缺資料時從備份還原或下載 → 執行 SQL 查詢：
-
-```
-/tw-realestate-query 臺北市大安區忠孝東路近兩年大樓成交行情
-/tw-realestate-query 臺北市信義區透天厝均價
-/tw-realestate-query 臺北市中山區租金行情
-```
+使用前需編輯 `SKILL.md`，將 `ETL_ROOT` 改為你的專案絕對路徑。
 
 ## 單位換算
 

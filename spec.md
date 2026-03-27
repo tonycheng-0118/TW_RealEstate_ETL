@@ -3,7 +3,9 @@
 ## 1. 專案概述
 
 ### 目標
-建立自動化 pipeline，定期下載內政部實價登錄開放資料（Open Data），清洗後匯入本地 PostgreSQL，並透過 Claude Code MCP 技能以自然語言查詢不動產成交行情。
+建立自動化 pipeline，定期下載內政部實價登錄開放資料（Open Data），清洗後匯入本地 PostgreSQL，並透過 Claude Code Skill 以自然語言查詢不動產成交行情。
+
+**Skill 發布目標**：將 TW_RealEstate_ETL 打包為自包含的 Claude Code Skill，使用者只需複製一個資料夾到 `~/.claude/skills/`，即可在 Claude Code 中完成所有操作（初始化、ETL、查詢、備份、排程管理）。不需要 git clone、不需要 pip install、不需要 npm。
 
 ### 使用情境
 - 查詢特定地址/地號附近的歷史成交價格
@@ -11,48 +13,73 @@
 - 比對租金行情
 - 搭配地籍圖資做土地估價參考
 
+### 使用者體驗（Skill 模式）
+
+```bash
+# 安裝（唯一步驟）
+cp -r tw-realestate-etl/ ~/.claude/skills/
+
+# 之後全部在 Claude Code 裡操作
+claude
+> /tw-realestate-etl                ← 顯示 help
+> /tw-realestate-etl init
+> /tw-realestate-etl run 114S1 A
+> /tw-realestate-etl query 臺北市大安區忠孝東路近兩年大樓成交行情
+> /tw-realestate-etl status
+> /tw-realestate-etl backup
+> /tw-realestate-etl schedule install
+```
+
 ### 技術棧
 - **語言**: Python 3.12+
-- **資料庫**: PostgreSQL 17（本地端 Mac mini M4，透過 Homebrew 安裝）
-- **排程**: macOS crontab
-- **AI 查詢**: Claude Code + MCP PostgreSQL Server
+- **資料庫**: PostgreSQL 17（透過 Homebrew 安裝）
+- **排程**: macOS LaunchAgent
+- **AI 查詢**: Claude Code Skill + MCP PostgreSQL Server（可選）
 - **主要套件**: requests, pandas, psycopg2-binary
 
 ---
 
 ## 2. 系統架構
 
+### Repo 模式（開發者）
+
 ```
-Mac mini M4 (localhost)
-┌──────────────────────────────────────────────────────────────┐
-│                                                              │
-│  [crontab 每月 2/12/22 日]                                    │
-│       │                                                      │
-│       ▼                                                      │
-│  [run_etl.py]  ← 唯一進入點，cron 和 Claude Code 都呼叫它     │
-│       │                                                      │
-│       ├─→ Step 1: download    從 plvr.land.moi.gov.tw 下載ZIP│
-│       │                                                      │
-│       ├─→ Step 2: transform   解壓、Big5→UTF8、型別轉換       │
-│       │                                                      │
-│       ├─→ Step 3: load        Upsert 進 PostgreSQL           │
-│       │                                                      │
-│       └─→ Step 4: backup      pg_dump + gzip → 備份目錄       │
-│                                  │                │          │
-│                                  ▼                ▼          │
-│                           [PostgreSQL]    [備份 .sql.gz]      │
-│                           localhost:5432   ~/backups/         │
-│                           db: tw_realestate       │              │
-│                                  ▲            │              │
-│                                  │      [Google Drive 同步]   │
-│  [Claude Code] ─── MCP ─────────┘      （桌面版/rclone 定期） │
-│       ▲              (@modelcontextprotocol/                 │
-│       │               server-postgres)                       │
-│  [使用者在終端機下自然語言指令]                                  │
-│       or                                                     │
-│  [LINE bot] ── claude -p                                     │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+[LaunchAgent 每月 2/12/22 日]
+       │
+       ▼
+  run_etl.py  ← 唯一進入點，排程和 Claude Code 都呼叫它
+       │
+       ├─ Step 1: download    從 plvr.land.moi.gov.tw 下載 ZIP
+       ├─ Step 2: transform   解壓、Big5→UTF8、型別轉換
+       ├─ Step 3: load        Upsert 進 PostgreSQL
+       └─ Step 4: backup      pg_dump + gzip → 備份目錄
+                                 │
+                                 ▼
+                          [PostgreSQL]
+                          localhost:5432
+                          db: tw_realestate
+                                 ▲
+                                 │
+  [Claude Code] ─── MCP ───────┘
+```
+
+### Skill 模式（一般使用者）
+
+```
+[使用者]
+    │
+    ▼
+[Claude Code]
+    │  /tw-realestate-etl <指令>
+    ▼
+[SKILL.md 路由]
+    │
+    ├─ init     → 互動問答 → 寫入 config.json → createdb + schema.sql
+    ├─ run      → env vars + python run_etl.py
+    ├─ query    → psql 執行 SQL
+    ├─ status   → psql 查 etl_log + 筆數
+    ├─ backup   → python backup.py
+    └─ schedule → launchctl 管理
 ```
 
 ---
@@ -88,27 +115,60 @@ Mac mini M4 (localhost)
 
 ## 4. 專案結構
 
+### Repo 結構
+
 ```
 TW_RealEstate_ETL/
 ├── README.md                 # 專案說明與快速開始指南
 ├── requirements.txt          # Python 依賴套件
-├── config.py                 # 全域設定（DB 連線、URL、欄位對照、備份路徑）
+├── config.py                 # 全域設定（雙模式：repo + skill）
+├── build_skill.sh            # 打包腳本，產出 dist/tw-realestate-etl/
+├── spec.md                   # 開發規格書（本文件）
+├── .mcp.json                 # Claude Code MCP PostgreSQL 設定
 ├── scripts/
+│   ├── __init__.py
+│   ├── run_etl.py            # 主控腳本（唯一進入點）
 │   ├── download.py           # Step 1: 下載 ZIP
 │   ├── transform.py          # Step 2: 解壓 + 清洗 CSV
 │   ├── load.py               # Step 3: Upsert 進 PostgreSQL
-│   ├── backup.py             # Step 4: pg_dump + gzip 備份
-│   └── run_etl.py            # 主控腳本，串接 1→2→3→4（唯一進入點）
+│   └── backup.py             # Step 4: pg_dump + gzip 備份
 ├── sql/
-│   └── schema.sql            # PostgreSQL DDL（建表、索引、初始資料）
+│   └── schema.sql            # PostgreSQL DDL（表、索引、觸發器）
 ├── launchd/
-│   └── com.tw-realestate.etl.plist  # macOS LaunchAgent 排程設定
+│   └── com.tw-realestate.etl.plist  # macOS LaunchAgent 排程模板
 ├── claude-skill/
-│   └── SKILL.md              # Claude Code 技能定義
-├── logs/                     # ETL 與備份執行日誌
-└── tests/
-    └── test_transform.py     # 單元測試
+│   ├── tw-realestate-etl/
+│   │   └── SKILL.md          # 統一 Skill（7 操作：help/init/run/query/status/backup/schedule）
+│   └── tw-realestate-query/
+│       └── SKILL.md          # 舊版查詢 Skill（僅查詢功能）
+├── tests/
+│   └── test_transform.py     # 單元測試
+├── logs/                     # 執行日誌（gitignore）
+└── data/                     # 下載的 ZIP/CSV（gitignore）
 ```
+
+### Skill 發布結構（打包後）
+
+```
+~/.claude/skills/tw-realestate-etl/
+├── SKILL.md                    # 技能定義（唯一進入點）
+├── config.json                 # init 時產生，存放使用者設定
+├── scripts/
+│   ├── __init__.py
+│   ├── requirements.txt        # Python 依賴
+│   ├── config.py               # Python 設定（讀取 config.json）
+│   ├── download.py             # Step 1: 下載 ZIP
+│   ├── transform.py            # Step 2: 解壓 + 清洗
+│   ├── load.py                 # Step 3: Upsert PostgreSQL
+│   ├── backup.py               # Step 4: pg_dump + gzip
+│   └── run_etl.py              # 主控腳本（串接 1→2→3→4）
+├── sql/
+│   └── schema.sql              # PostgreSQL DDL
+└── launchd/
+    └── com.tw-realestate.etl.plist  # macOS LaunchAgent 模板
+```
+
+總大小約 50-60 KB，極輕量。
 
 ---
 
@@ -175,9 +235,9 @@ CREATE TABLE transactions (
     note                TEXT,           -- 備註
 
     -- ETL metadata
-    source_file         TEXT,           -- 來源檔名 e.g. d_lvr_land_a.csv
+    source_file         TEXT,           -- 來源檔名 e.g. a_lvr_land_a.csv
     source_season       TEXT,           -- 季度 e.g. 113S4
-    city_code           CHAR(1),        -- 縣市代碼 e.g. D
+    city_code           CHAR(1),        -- 縣市代碼 e.g. A
     created_at          TIMESTAMPTZ DEFAULT NOW(),
     updated_at          TIMESTAMPTZ DEFAULT NOW(),
 
@@ -199,7 +259,7 @@ CREATE TABLE transactions (
 CREATE TABLE etl_log (
     id          SERIAL PRIMARY KEY,
     season      TEXT NOT NULL,          -- e.g. 113S4
-    file_name   TEXT NOT NULL,          -- e.g. d_lvr_land_a.csv
+    file_name   TEXT NOT NULL,          -- e.g. a_lvr_land_a.csv
     row_count   INTEGER,
     status      TEXT DEFAULT 'success', -- success / failed
     started_at  TIMESTAMPTZ,
@@ -339,7 +399,7 @@ python scripts/download.py --current              # 當期
 
 ### 7.4 run_etl.py
 
-**功能**: 主控腳本，串接 download → transform → load → backup。cron 和 Claude Code 都透過這支腳本操作。
+**功能**: 主控腳本，串接 download → transform → load → backup。排程和 Claude Code 都透過這支腳本操作。
 
 **CLI 介面**:
 ```bash
@@ -347,6 +407,8 @@ python scripts/run_etl.py --season 113S4            # 單季 ETL + 備份
 python scripts/run_etl.py --from 112S1 --to 114S1   # 範圍 ETL + 備份
 python scripts/run_etl.py --current                  # 當期 ETL + 備份
 python scripts/run_etl.py --backup-only              # 只執行備份，不跑 ETL
+python scripts/run_etl.py --season 114S1 --city A    # 指定縣市
+python scripts/run_etl.py --from 111S1 --to 112S4 --city A,F  # 多縣市
 ```
 
 **流程**:
@@ -373,9 +435,9 @@ run_etl.py
 1. 呼叫 `pg_dump -d tw_realestate` 透過 subprocess 執行
 2. 輸出透過 gzip 壓縮為 `.sql.gz`
 3. 檔名格式: `tw_realestate_{YYYYMMDD}.sql.gz`
-4. 存放路徑: `config.BACKUP_DIR`（預設為 Google Drive 同步資料夾）
+4. 存放路徑: `config.BACKUP_DIR`（可設定為雲端同步資料夾）
 5. 清理舊備份：本地只保留最近 `config.BACKUP_KEEP_COUNT` 份（預設 4），舊的自動刪除
-6. 備份目錄由使用者設定 Google Drive 桌面版同步，`backup.py` 本身不處理上傳，只負責把檔案放到正確位置
+6. 備份目錄可由使用者設定為雲端同步資料夾，`backup.py` 本身不處理上傳，只負責把檔案放到正確位置
 
 **重要設計**:
 - 備份是 `run_etl.py` 的最後一步，ETL 失敗時不會產生備份，確保備份永遠對應一致的資料庫狀態
@@ -386,28 +448,192 @@ run_etl.py
 
 ## 8. config.py 設定項
 
-| 設定 | 預設值 | 說明 |
-|------|--------|------|
-| DB_CONFIG.host | localhost | PostgreSQL 主機 |
-| DB_CONFIG.port | 5432 | PostgreSQL 埠 |
-| DB_CONFIG.dbname | tw_realestate | 資料庫名稱 |
-| DB_CONFIG.user | $USER | 系統使用者名稱 |
-| DB_CONFIG.password | "" | 本地端通常免密碼 |
-| DATA_DIR | ./data | ZIP/CSV 暫存目錄 |
-| DOWNLOAD_DELAY_SEC | 10 | 下載間隔秒數 |
-| TARGET_CITY_CODES | ["A"] | 篩選縣市（A=臺北），None=全台 |
-| BACKUP_DIR | ~/Google Drive/backups/TW_RealEstate_ETL/ | 備份檔存放路徑（設定為 Google Drive 同步資料夾即自動上傳雲端） |
-| BACKUP_KEEP_COUNT | 4 | 本地保留最近 N 份備份，舊的自動刪除 |
+### 雙模式設計
 
-所有設定支援環境變數覆寫（`REALPRICE_DB_HOST` 等）。
+config.py 支援兩種目錄佈局：
+
+| 模式 | config.py 位置 | 偵測方式 |
+|------|---------------|---------|
+| Repo | 專案根目錄 | `_this_dir.name != "scripts"` |
+| Skill | `scripts/` 子資料夾內 | `_this_dir.name == "scripts"` |
+
+### 設定來源優先順序
+
+```
+config.json（skill 模式主要設定源）
+    ↓ 不存在時
+環境變數（REALPRICE_* 前綴）
+    ↓ 不存在時
+預設值
+```
+
+```python
+def _get(key: str, env_key: str, default):
+    """config.json → env var → default"""
+    if key in _cfg:
+        return _cfg[key]
+    return os.environ.get(env_key, default)
+```
+
+### config.json 設計
+
+由 `init` 操作產生，存放在 skill 資料夾內，所有操作都讀這個檔案。
+
+```json
+{
+  "db_host": "localhost",
+  "db_port": 5432,
+  "db_name": "tw_realestate",
+  "db_user": "yourname",
+  "db_password": "",
+  "target_cities": ["A"],
+  "backup_dir": "~/.claude/skills/tw-realestate-etl/backups",
+  "backup_keep_count": 4,
+  "data_dir": "~/.claude/skills/tw-realestate-etl/data",
+  "python_path": "/usr/bin/python3",
+  "initialized_at": "2026-03-28T15:30:00"
+}
+```
+
+**特性**:
+- 路徑欄位支援 `~`（scripts 內展開為絕對路徑）
+- `python_path` 在 init 時自動偵測（`which python3`）
+- 如果 config.json 不存在，SKILL.md 指示 Claude Code 引導使用者執行 init
+
+### 設定項一覽
+
+| 設定 | config.json key | 環境變數 | 預設值 | 說明 |
+|------|----------------|---------|--------|------|
+| DB host | `db_host` | `REALPRICE_DB_HOST` | `localhost` | PostgreSQL 主機 |
+| DB port | `db_port` | `REALPRICE_DB_PORT` | `5432` | PostgreSQL 埠 |
+| DB name | `db_name` | `REALPRICE_DB_NAME` | `tw_realestate` | 資料庫名稱 |
+| DB user | `db_user` | `REALPRICE_DB_USER` | `$USER` | 系統使用者名稱 |
+| DB password | `db_password` | `REALPRICE_DB_PASSWORD` | `""` | 本地端通常免密碼 |
+| 資料目錄 | `data_dir` | `REALPRICE_DATA_DIR` | `./data` | ZIP/CSV 暫存目錄 |
+| 備份目錄 | `backup_dir` | `REALPRICE_BACKUP_DIR` | `./backups` | 備份檔存放路徑 |
+| 備份保留數 | `backup_keep_count` | `REALPRICE_BACKUP_KEEP_COUNT` | `4` | 保留最近 N 份，0=全部保留 |
+| 目標縣市 | `target_cities` | `REALPRICE_TARGET_CITIES` | `["A"]` | 篩選縣市，`None`/`"all"`=全台 |
+| 下載間隔 | `download_delay` | `REALPRICE_DOWNLOAD_DELAY` | `10` | 下載間隔秒數 |
+| 批次大小 | `batch_size` | `REALPRICE_BATCH_SIZE` | `500` | Upsert 批次筆數 |
 
 ---
 
-## 9. Claude Code 整合
+## 9. Claude Code Skill 整合
 
-### 9.1 MCP 設定
+### 9.1 Skill 架構
 
-在 `~/.claude/claude_code_config.json` 加入：
+SKILL.md 是唯一進入點，包含 7 個操作，Claude Code 根據使用者輸入判斷要執行哪一個。
+
+#### 操作 0: help — 顯示使用說明
+
+**觸發**: `/tw-realestate-etl help` 或無參數
+
+直接輸出使用說明文字，不需要執行任何指令。
+
+#### 操作 1: init — 初始化設定
+
+**觸發**: `/tw-realestate-etl init` 或首次使用時 config.json 不存在
+
+**流程**:
+```
+Step 1: 檢查前置需求
+  ├─ which python3     → 沒有則提示安裝
+  ├─ which psql        → 沒有則提示 brew install postgresql@17
+  └─ which pg_dump     → 同上
+
+Step 2: 安裝 Python 依賴
+  pip install pandas psycopg2-binary requests python-dotenv
+
+Step 3: 互動問答（Claude Code 直接對話）
+  ├─ 選擇預設縣市（顯示代碼表）
+  ├─ DB 設定（host/port/name/user，都有預設值）
+  └─ 備份目錄
+
+Step 4: 寫入 config.json
+
+Step 5: 建立資料庫
+  createdb <db_name>
+  psql -d <db_name> -f <SKILL_ROOT>/sql/schema.sql
+
+Step 6: 顯示完成訊息與下一步指引
+```
+
+**重要**: init 的互動問答不是由 Python script 處理，而是由 Claude Code 自己跟使用者對話，收集答案後組成 config.json 寫入。
+
+#### 操作 2: run — 執行 ETL
+
+**觸發**: `/tw-realestate-etl run <season> [city]`
+
+**範例**:
+```
+/tw-realestate-etl run 114S1          ← 用 config.json 裡的預設縣市
+/tw-realestate-etl run 114S1 A        ← 指定臺北
+/tw-realestate-etl run 112S1-114S1 A,F ← 範圍 + 多縣市
+/tw-realestate-etl run current        ← 當期
+```
+
+**流程**:
+1. 讀取 config.json → 不存在則引導 init
+2. 組合環境變數 prefix + 呼叫 `python run_etl.py --season <season> --city <city>`
+3. 回報結果
+
+#### 操作 3: query — 查詢實價登錄
+
+**觸發**: `/tw-realestate-etl query <自然語言查詢>`
+
+**範例**:
+```
+/tw-realestate-etl query 臺北市大安區忠孝東路近兩年大樓成交行情
+/tw-realestate-etl query 臺北市中正區透天厝均價
+```
+
+**流程**:
+1. 讀取 config.json 取得 DB 連線
+2. 確認目標縣市資料已匯入（查 etl_log）
+3. 解析查詢意圖 → 組合 SQL（含單位換算、排除特殊交易、扣除車位計算淨單價）
+4. 執行 psql 查詢
+5. 用繁體中文回覆（表格 + 行情摘要 + 注意事項）
+
+#### 操作 4: status — 查看狀態
+
+**觸發**: `/tw-realestate-etl status`
+
+查詢並回報：各表筆數、最近匯入紀錄、最新備份檔案。
+
+#### 操作 5: backup — 手動備份
+
+**觸發**: `/tw-realestate-etl backup`
+
+呼叫 `python backup.py`，回報備份結果。
+
+#### 操作 6: schedule — 排程管理
+
+**觸發**: `/tw-realestate-etl schedule <install|uninstall|status>`
+
+- **install**: 讀 plist 模板 → 替換路徑 + 嵌入環境變數 → 寫入 `~/Library/LaunchAgents/` → `launchctl load`
+- **uninstall**: `launchctl unload` → 刪除 plist
+- **status**: `launchctl list | grep tw-realestate`
+
+### 9.2 環境變數傳遞機制
+
+SKILL.md 指示 Claude Code 在呼叫 Python 腳本前，從 config.json 讀取值並組成環境變數前綴：
+
+```bash
+REALPRICE_DB_HOST=localhost \
+REALPRICE_DB_PORT=5432 \
+REALPRICE_DB_NAME=tw_realestate \
+REALPRICE_DB_USER=yourname \
+REALPRICE_BACKUP_DIR=~/.claude/skills/tw-realestate-etl/backups \
+REALPRICE_TARGET_CITIES=A \
+python ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py --season 114S1
+```
+
+Python 腳本內的 config.py 同時支援 config.json 和環境變數，兩種方式都能正常運作。
+
+### 9.3 MCP 設定（可選）
+
+在專案 `.mcp.json` 或全域設定中加入：
+
 ```json
 {
   "mcpServers": {
@@ -423,37 +649,28 @@ run_etl.py
 }
 ```
 
-### 9.2 Skill 安裝
+在純 Skill 方案中 MCP 非必要，query 操作用 `psql` CLI 即可。但如果使用者的環境有 MCP 可用，query 可走 MCP 查詢。
 
-將 `claude-skill/SKILL.md` 複製到 Claude Code 的 skills 路徑。
-
-SKILL.md 包含：
-- **觸發條件**: 何時啟用此技能
-- **Schema 參考**: 完整欄位說明
-- **單位換算**: 1 坪 = 3.30579 m²；元/坪 = 元/m² × 3.30579
-- **查詢注意事項**: 排除特殊交易、車位價格扣除、建物型態說明
-- **SQL 範例**: 常見查詢模式
-
-### 9.3 使用方式
+### 9.4 使用方式
 
 ```bash
-# 互動模式
+# 互動模式（Skill）
 claude
-> 查詢大安區忠孝東路附近近兩年的大樓成交行情
+> /tw-realestate-etl query 臺北市大安區忠孝東路近兩年大樓成交行情
 
 # 非互動模式（可串接 LINE bot）
-claude -p "大安區建國段100地號附近的實價登錄"
+claude -p "臺北市大安區建國段100地號附近的實價登錄"
 ```
 
 ---
 
 ## 10. 排程（macOS LaunchAgent）
 
-使用 macOS 原生的 `launchd` 排程（LaunchAgent），取代 crontab。
+使用 macOS 原生的 `launchd` 排程（LaunchAgent）。
 
-### plist 檔案
+### plist 模板
 
-存放路徑：`~/Library/LaunchAgents/com.tw-realestate.etl.plist`
+存放於 `launchd/com.tw-realestate.etl.plist`，包含 `/path/to/` 佔位符，由 `schedule install` 操作自動替換。
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -500,9 +717,8 @@ claude -p "大安區建國段100地號附近的實價登錄"
     <key>StandardErrorPath</key>
     <string>/path/to/TW_RealEstate_ETL/logs/etl.stderr.log</string>
 
-    <!-- 如果錯過排程時間（電腦睡眠），醒來後補跑 -->
-    <key>StartInterval</key>
-    <integer>0</integer>
+    <key>TimeOut</key>
+    <integer>600</integer>
 </dict>
 </plist>
 ```
@@ -525,8 +741,8 @@ launchctl list | grep tw-realestate
 
 ### 設計原則
 - LaunchAgent 只做一件事：呼叫 `run_etl.py --current`
-- 不寫任何業務邏輯，所有邏輯（下載、清洗、匯入、備份）封裝在 `run_etl.py` 內部
-- 手動執行 `run_etl.py` 或透過 Claude Code skill 觸發，行為完全一致
+- 不寫任何業務邏輯，所有邏輯封裝在 `run_etl.py` 內部
+- 手動執行或透過 Skill 觸發，行為完全一致
 - stdout/stderr 分開記錄到 `logs/` 目錄
 
 ---
@@ -562,10 +778,49 @@ launchctl list | grep tw-realestate
 
 ---
 
-## 13. 開發步驟建議
+## 13. Skill 打包與發布
+
+### 從 repo 打包 skill
+
+```bash
+./build_skill.sh
+```
+
+腳本將需要的檔案組裝到 `dist/tw-realestate-etl/`：
+- `SKILL.md` ← 從 `claude-skill/tw-realestate-etl/`
+- `scripts/*.py` + `config.py`（root → scripts/）
+- `sql/schema.sql`
+- `launchd/*.plist`
+
+### GitHub Release 發布
+
+```bash
+# 打包
+./build_skill.sh
+cd dist && zip -r tw-realestate-etl.zip tw-realestate-etl/
+
+# 在 GitHub Release 頁面上傳 tw-realestate-etl.zip
+# 使用者下載後：
+unzip tw-realestate-etl.zip -d ~/.claude/skills/
+```
+
+### 向後相容設計
+
+config.py 的雙模式偵測確保兩種佈局都能正常運作：
+
+| 場景 | config.py 位置 | `_this_dir.name` | 行為 |
+|------|---------------|-------------------|------|
+| Repo 開發 | 專案根目錄 | `TW_RealEstate_ETL` | 讀 `.env` → env vars → defaults |
+| Skill 安裝 | `scripts/` 內 | `scripts` | 讀 `config.json` → env vars → defaults |
+
+run_etl.py 使用 try/except import 同時支援 package-qualified（repo）和 direct（skill）兩種 import 路徑。
+
+---
+
+## 14. 開發步驟
 
 ### Phase 1: 基礎建設
-1. Mac mini 安裝 PostgreSQL 17
+1. 安裝 PostgreSQL 17
 2. 建立 tw_realestate database 並執行 schema.sql
 3. 實作 config.py
 
@@ -578,13 +833,20 @@ launchctl list | grep tw-realestate
 
 ### Phase 3: Claude Code 整合
 9. 設定 MCP PostgreSQL Server
-10. 安裝 SKILL.md
+10. 安裝查詢 SKILL.md
 11. 測試自然語言查詢
 
 ### Phase 4: 自動化與備份
 12. 實作 backup.py（pg_dump + gzip + 清理舊檔）
 13. 將 backup 整合進 run_etl.py 作為最後一步
-14. 設定 `BACKUP_DIR` 指向 Google Drive 同步資料夾
+14. 設定 `BACKUP_DIR` 指向備份目錄
 15. 建立 LaunchAgent plist，`launchctl load` 啟用排程
-16. 加入 log rotation
-17. （可選）整合到 LINE bot 架構
+
+### Phase 5: Skill 打包發布
+16. 擴充 SKILL.md 為 7 操作（init/run/query/status/backup/schedule）
+17. 修改 config.py 支援 config.json + 雙模式偵測
+18. 修改 run_etl.py 支援雙模式 import
+19. 寫 build_skill.sh
+20. 測試完整流程：乾淨環境 → cp skill → init → run → query
+21. 在 GitHub Release 發布 zip
+22. 更新 README 加入 skill 安裝說明

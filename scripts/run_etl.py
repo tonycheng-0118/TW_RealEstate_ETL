@@ -20,18 +20,39 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import config
-from scripts.download import download_season, download_current, parse_season_range
-from scripts.transform import process_season, process_current
-from scripts.load import (
-    get_connection,
-    check_already_loaded,
-    upsert_transactions,
-    upsert_rentals,
-    log_etl,
-)
-from scripts.backup import backup_database
+# Dual-mode path setup: works in both repo layout (scripts/ under project root)
+# and skill layout (config.py is a sibling in the same scripts/ folder).
+_script_dir = Path(__file__).resolve().parent
+_project_root = _script_dir.parent
+sys.path.insert(0, str(_project_root))
+sys.path.insert(0, str(_script_dir))
+
+import config  # noqa: E402 — found in project root (repo) or scripts/ (skill)
+
+# Repo mode: package-qualified imports (from scripts.xxx).
+# Skill mode: direct imports (from xxx) when scripts/ is not a subpackage.
+try:
+    from scripts.download import download_season, download_current, parse_season_range
+    from scripts.transform import process_season, process_current
+    from scripts.load import (
+        get_connection,
+        check_already_loaded,
+        upsert_transactions,
+        upsert_rentals,
+        log_etl,
+    )
+    from scripts.backup import backup_database
+except ImportError:
+    from download import download_season, download_current, parse_season_range
+    from transform import process_season, process_current
+    from load import (
+        get_connection,
+        check_already_loaded,
+        upsert_transactions,
+        upsert_rentals,
+        log_etl,
+    )
+    from backup import backup_database
 
 logger = logging.getLogger(__name__)
 
