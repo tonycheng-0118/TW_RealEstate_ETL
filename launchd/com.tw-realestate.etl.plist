@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    TW_RealEstate_ETL — macOS LaunchAgent
+
+    安裝前請將下方所有 /path/to/TW_RealEstate_ETL 替換為你的實際專案路徑，例如：
+      /Users/yourname/TW_RealEstate_ETL
+
+    安裝步驟：
+      cp launchd/com.tw-realestate.etl.plist ~/Library/LaunchAgents/
+      launchctl load ~/Library/LaunchAgents/com.tw-realestate.etl.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tw-realestate.etl</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/path/to/TW_RealEstate_ETL/.venv/bin/python</string>
+        <string>/path/to/TW_RealEstate_ETL/scripts/run_etl.py</string>
+        <string>--current</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/path/to/TW_RealEstate_ETL</string>
+
+    <!-- Run on the 2nd, 12th, and 22nd of each month at 03:00 -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Day</key><integer>2</integer>
+            <key>Hour</key><integer>3</integer>
+            <key>Minute</key><integer>0</integer>
+        </dict>
+        <dict>
+            <key>Day</key><integer>12</integer>
+            <key>Hour</key><integer>3</integer>
+            <key>Minute</key><integer>0</integer>
+        </dict>
+        <dict>
+            <key>Day</key><integer>22</integer>
+            <key>Hour</key><integer>3</integer>
+            <key>Minute</key><integer>0</integer>
+        </dict>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/path/to/TW_RealEstate_ETL/logs/etl.stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/path/to/TW_RealEstate_ETL/logs/etl.stderr.log</string>
+
+    <!-- Timeout: 10 minutes -->
+    <key>TimeOut</key>
+    <integer>600</integer>
+</dict>
+</plist>

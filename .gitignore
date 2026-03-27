@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Data (downloaded ZIPs and extracted CSVs)
+data/
+
+# Logs
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# pytest
+.pytest_cache/
+
+# Claude Code local settings (may contain personal paths)
+.claude/
+
+# Environment
+.env
+
+# Backups (local)
+backups/
