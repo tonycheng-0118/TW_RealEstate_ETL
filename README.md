@@ -233,18 +233,26 @@ cp .env.template .env
 
 ### 方法一：從 Release 安裝（推薦）
 
+到 [Releases](https://github.com/tonycheng-0118/TW_RealEstate_ETL/releases) 頁面下載 **`tw-realestate-etl.zip`**（Assets 區的附件，不是 Source code）：
+
 ```bash
-# 下載 zip 並解壓到 skills 目錄
+# 解壓到 skills 目錄（zip 內已含 tw-realestate-etl/ 資料夾）
 unzip tw-realestate-etl.zip -d ~/.claude/skills/
 
 # 在 Claude Code 中初始化
 /tw-realestate-etl init
 ```
 
+> **注意**：請下載 Assets 中的 `tw-realestate-etl.zip`，而非 GitHub 自動產生的 Source code 壓縮檔。
+> Source code 包含整個 repo（tests、CI 設定等），不適合直接當 skill 使用。
+
 ### 方法二：從 repo 打包安裝
 
 ```bash
-# 在 repo 內打包
+git clone https://github.com/tonycheng-0118/TW_RealEstate_ETL.git
+cd TW_RealEstate_ETL
+
+# 打包（產出 dist/tw-realestate-etl/，只含 skill 需要的檔案）
 ./build_skill.sh
 
 # 複製到 skills 目錄
