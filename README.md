@@ -145,9 +145,10 @@ TW_RealEstate_ETL/
 │   └── schema.sql            # PostgreSQL DDL（表、索引、觸發器）
 ├── launchd/
 │   └── com.tw-realestate.etl.plist  # macOS LaunchAgent 排程
+├── build_skill.sh            # Skill 打包腳本（產出 dist/tw-realestate-etl/）
 ├── claude-skill/
-│   └── tw-realestate-query/
-│       └── SKILL.md          # Claude Code 查詢技能（自動補資料 + SQL 查詢）
+│   └── tw-realestate-etl/
+│       └── SKILL.md          # Claude Code 統一技能（7 操作：help/init/run/query/status/backup/schedule）
 ├── tests/
 │   └── test_transform.py     # 單元測試
 ├── logs/                     # 執行日誌（gitignore）
@@ -267,15 +268,6 @@ cp -r dist/tw-realestate-etl ~/.claude/skills/
 /tw-realestate-etl schedule install               安裝排程
 ```
 
-### 舊版查詢 Skill（仍可使用）
-
-如果只需要查詢功能，可使用 repo 內的查詢專用 skill：
-
-```bash
-cp -r claude-skill/tw-realestate-query ~/.claude/skills/
-```
-
-使用前需編輯 `SKILL.md`，將 `ETL_ROOT` 改為你的專案絕對路徑。
 
 ## 單位換算
 
