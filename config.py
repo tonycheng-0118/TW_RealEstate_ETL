@@ -164,39 +164,55 @@ COLUMN_MAP_A = {
 # 預售屋 (b) uses the same mapping as 買賣 (a).
 COLUMN_MAP_B = COLUMN_MAP_A.copy()
 
-# 租賃 (c) — differs in price-related columns (rent instead of sale price).
+# 租賃 (c) — rental CSVs use different Chinese headers from sales CSVs.
+# Key differences: 租賃年月日 (not 交易年月日), 租賃筆棟數 (not 交易筆棟數),
+# 租賃層次 (not 移轉層次), 土地面積 (not 土地移轉總面積), 建物總面積
+# (not 建物移轉總面積), 總額元 (not 總價元/租金元).
 COLUMN_MAP_C = {
     "鄉鎮市區": "district",
     "交易標的": "target_type",
+    # Address: rental CSVs use "土地位置建物門牌" (same as newer sales CSVs).
     "土地區段位置建物區段門牌": "address",
     "土地位置建物門牌": "address",
-    "土地移轉總面積平方公尺": "land_area",
+    # Area: rental CSVs use "土地面積平方公尺" (no 移轉總).
+    "土地面積平方公尺": "land_area",
+    "土地移轉總面積平方公尺": "land_area",  # fallback for older formats
     "都市土地使用分區": "zoning_urban",
     "非都市土地使用分區": "zoning_non_urban",
     "非都市土地使用編定": "zoning_non_urban_cd",
-    "交易年月日": "transaction_date",
-    "交易筆棟數": "transaction_note",
-    "移轉層次": "floor_transferred",
+    # Date: rental CSVs use "租賃年月日" instead of "交易年月日".
+    "租賃年月日": "transaction_date",
+    "交易年月日": "transaction_date",  # fallback for older formats
+    # Note: rental CSVs use "租賃筆棟數" instead of "交易筆棟數".
+    "租賃筆棟數": "transaction_note",
+    "交易筆棟數": "transaction_note",  # fallback for older formats
+    # Floor: rental CSVs use "租賃層次" instead of "移轉層次".
+    "租賃層次": "floor_transferred",
+    "移轉層次": "floor_transferred",  # fallback for older formats
     "總樓層數": "total_floors",
     "建物型態": "building_type",
     "主要用途": "main_purpose",
     "主要建材": "main_material",
     "建築完成年月": "build_complete_date",
-    "建物移轉總面積平方公尺": "building_area",
+    # Building area: rental CSVs use "建物總面積平方公尺" (no 移轉).
+    "建物總面積平方公尺": "building_area",
+    "建物移轉總面積平方公尺": "building_area",  # fallback for older formats
     "建物現況格局-房": "rooms",
     "建物現況格局-廳": "halls",
     "建物現況格局-衛": "bathrooms",
     "建物現況格局-隔間": "has_partition",
     "有無管理組織": "has_management",
-    # Rental-specific price columns
-    "租金元": "total_rent",
+    # Rental-specific price columns: actual CSV uses "總額元", not "租金元".
+    "總額元": "total_rent",
+    "租金元": "total_rent",  # fallback for older formats
     "單價元平方公尺": "unit_rent",
     "備註": "note",
     "編號": "serial_no",
     "主建物面積": "main_area",
     "附屬建物面積": "sub_area",
     "陽台面積": "balcony_area",
-    "電梯": "has_elevator",
+    "有無電梯": "has_elevator",
+    "電梯": "has_elevator",  # fallback for older formats
     "移轉編號": "transfer_no",
 }
 
