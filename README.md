@@ -87,29 +87,61 @@ psql -d tw_realestate -f sql/schema.sql
 ### 執行 ETL
 
 ```bash
+# 當前季度（不帶參數 = 當前季度）
+python scripts/run_etl.py
+
 # 單季
-python scripts/run_etl.py --season 114S1
+python scripts/run_etl.py --start 114S1 --end 114S1
 
 # 批次匯入（範圍）
-python scripts/run_etl.py --from 112S1 --to 114S1
+python scripts/run_etl.py --start 112S1 --end 114S1
+
+# 從特定季度到當前（省略 --end = 到當前季度）
+python scripts/run_etl.py --start 113S1
 
 # 指定縣市（覆蓋 config.py 預設值）
-python scripts/run_etl.py --season 114S1 --city J
+python scripts/run_etl.py --start 114S1 --end 114S1 --city J
 
 # 多縣市
-python scripts/run_etl.py --from 111S1 --to 112S4 --city J,H
+python scripts/run_etl.py --start 111S1 --end 112S4 --city J,H
 
 # 全台
-python scripts/run_etl.py --season 114S1 --city all
-
-# 當期資料
-python scripts/run_etl.py --current
+python scripts/run_etl.py --start 114S1 --end 114S1 --city all
 
 # 只執行備份
 python scripts/run_etl.py --backup-only
 
 # ETL 完不備份
-python scripts/run_etl.py --season 114S1 --skip-backup
+python scripts/run_etl.py --start 114S1 --end 114S1 --skip-backup
+```
+
+**參數行為：**
+
+| `--start` | `--end` | 實際行為 |
+|-----------|---------|----------|
+| 留空 | 留空 | 當前季度（單季） |
+| `113S1` | `113S1` | 113S1 單季 |
+| `113S1` | `114S4` | 113S1 ~ 114S4 區間 |
+| `113S1` | 留空 | 113S1 ~ 當前季度 |
+
+**季度格式**：`{民國年}S{季度}`，例如 `113S1` = 2024 Q1、`114S4` = 2025 Q4
+
+> `source_season` 永遠使用實際季度號（如 `115S2`），不再使用 `current` 字串。
+
+### 刪除資料
+
+```bash
+# 刪除當前季度
+python scripts/delete.py
+
+# 刪除單季
+python scripts/delete.py --start 112S1 --end 112S1
+
+# 刪除區間
+python scripts/delete.py --start 112S1 --end 113S4
+
+# 刪除特定城市的特定季度
+python scripts/delete.py --start 113S2 --end 113S2 --city A
 ```
 
 ### 啟用排程（macOS LaunchAgent）
@@ -140,7 +172,9 @@ TW_RealEstate_ETL/
 │   ├── download.py           # Step 1: 下載 ZIP
 │   ├── transform.py          # Step 2: 解壓 + 清洗 CSV
 │   ├── load.py               # Step 3: Upsert PostgreSQL
-│   └── backup.py             # Step 4: pg_dump + gzip 備份
+│   ├── backup.py             # Step 4: pg_dump + gzip 備份
+│   ├── delete.py             # 刪除指定季度/區間資料
+│   └── season_utils.py       # 季度計算、驗證、參數解析
 ├── sql/
 │   └── schema.sql            # PostgreSQL DDL（表、索引、觸發器）
 ├── launchd/
