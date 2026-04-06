@@ -5,11 +5,12 @@ Chains download → transform → load → backup. Both cron/LaunchAgent
 and Claude Code call this single script.
 
 CLI usage:
-    python scripts/run_etl.py --season 113S4
-    python scripts/run_etl.py --from 112S1 --to 114S1
-    python scripts/run_etl.py --current
-    python scripts/run_etl.py --season 114S1 --city J      # 指定新竹縣
-    python scripts/run_etl.py --from 111S1 --to 112S4 --city J,H  # 多縣市
+    python scripts/run_etl.py                              # 當前季度
+    python scripts/run_etl.py --start 113S4 --end 113S4    # 單季
+    python scripts/run_etl.py --start 112S1 --end 114S1    # 區間
+    python scripts/run_etl.py --start 113S1                # 113S1 到當前
+    python scripts/run_etl.py --start 114S1 --end 114S1 --city J      # 指定新竹縣
+    python scripts/run_etl.py --start 111S1 --end 112S4 --city J,H    # 多縣市
     python scripts/run_etl.py --backup-only
 """
 
@@ -32,8 +33,9 @@ import config  # noqa: E402 — found in project root (repo) or scripts/ (skill)
 # Repo mode: package-qualified imports (from scripts.xxx).
 # Skill mode: direct imports (from xxx) when scripts/ is not a subpackage.
 try:
-    from scripts.download import download_season, download_current, parse_season_range
+    from scripts.download import download_season, download_current
     from scripts.transform import process_season, process_current
+    from scripts.season_utils import get_current_season, resolve_params, season_range
     from scripts.load import (
         get_connection,
         check_already_loaded,
@@ -43,8 +45,9 @@ try:
     )
     from scripts.backup import backup_database
 except ImportError:
-    from download import download_season, download_current, parse_season_range
+    from download import download_season, download_current
     from transform import process_season, process_current
+    from season_utils import get_current_season, resolve_params, season_range
     from load import (
         get_connection,
         check_already_loaded,
@@ -136,16 +139,16 @@ def run_etl(seasons: list[str], is_current: bool = False) -> dict:
 
     try:
         if is_current:
-            # Download and process current period.
-            logger.info("=== Processing current period ===")
+            current_season = get_current_season()
+            logger.info("=== Processing current period (tagged as %s) ===", current_season)
             try:
                 download_current()
                 dataframes = process_current()
-                summary = _load_dataframes(dataframes, "current", conn)
-                overall["current"] = summary
+                summary = _load_dataframes(dataframes, current_season, conn)
+                overall[current_season] = summary
             except Exception as e:
                 logger.error("Failed to process current period: %s", e, exc_info=True)
-                overall["current"] = {"error": str(e)}
+                overall[current_season] = {"error": str(e)}
         else:
             for i, season in enumerate(seasons):
                 logger.info("=== Processing season %s (%d/%d) ===", season, i + 1, len(seasons))
@@ -173,12 +176,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="TW RealEstate ETL — Download, transform, load, and backup"
     )
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--season", help="Single season, e.g. 113S4")
-    group.add_argument("--current", action="store_true", help="Process current period")
-    group.add_argument("--backup-only", action="store_true", help="Only run backup, skip ETL")
-    parser.add_argument("--from", dest="from_s", help="Range start, e.g. 112S1 (use with --to)")
-    parser.add_argument("--to", dest="to_s", help="Range end, e.g. 114S1 (use with --from)")
+    parser.add_argument("--start", help="Start season, e.g. 113S1. Empty = current.")
+    parser.add_argument("--end", help="End season, e.g. 114S4. Empty = start through current.")
+    parser.add_argument("--backup-only", action="store_true", help="Only run backup, skip ETL")
     parser.add_argument("--skip-backup", action="store_true", help="Skip backup after ETL")
     parser.add_argument(
         "--city",
@@ -200,25 +200,32 @@ def main():
 
     logger.info("TW_RealEstate_ETL started at %s", datetime.now().isoformat())
 
-    # Validate: at least one mode must be specified.
-    if not (args.season or args.current or args.backup_only or (args.from_s and args.to_s)):
-        parser.error("Specify --season, --from/--to, --current, or --backup-only")
-
-    # Validate: --from and --to must be used together.
-    if bool(args.from_s) != bool(args.to_s):
-        parser.error("--from and --to must be used together")
-
     # --- ETL ---
     if not args.backup_only:
-        if args.current:
+        # Resolve season parameters
+        try:
+            start, end, is_current = resolve_params(args.start, args.end)
+        except ValueError as e:
+            parser.error(str(e))
+
+        logger.info("Resolved: start=%s end=%s is_current=%s", start, end, is_current)
+
+        # Build season list and run
+        if is_current:
             overall = run_etl([], is_current=True)
-        elif args.from_s and args.to_s:
-            seasons = parse_season_range(args.from_s, args.to_s)
-            overall = run_etl(seasons)
-        elif args.season:
-            overall = run_etl([args.season])
+        elif start == end:
+            overall = run_etl([start])
         else:
-            parser.error("Specify --season, --from/--to, or --current")
+            seasons = season_range(start, end)
+            # If end == current season, also download current period for latest data
+            current = get_current_season()
+            if end == current:
+                historical = [s for s in seasons if s != current]
+                overall = run_etl(historical) if historical else {}
+                current_result = run_etl([], is_current=True)
+                overall.update(current_result)
+            else:
+                overall = run_etl(seasons)
 
         # Print summary.
         logger.info("=== ETL Summary ===")
@@ -243,3 +250,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

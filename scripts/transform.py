@@ -297,14 +297,18 @@ def process_season(season: str) -> dict[str, pd.DataFrame]:
 def process_current() -> dict[str, pd.DataFrame]:
     """Process the current-period ZIP (data/current.zip).
 
-    Uses 'current' as the season identifier.
+    Uses the computed current season (e.g. '115S2') as the season identifier.
     """
+    from season_utils import get_current_season
+
     zip_path = config.DATA_DIR / "current.zip"
     if not zip_path.exists():
         raise FileNotFoundError(f"ZIP not found: {zip_path}")
 
     extract_dir = config.DATA_DIR / "current"
     _extract_zip(zip_path, extract_dir)
+
+    current_season = get_current_season()
 
     results = {}
     for csv_path in sorted(extract_dir.glob("*.csv")):
@@ -319,9 +323,9 @@ def process_current() -> dict[str, pd.DataFrame]:
             continue
 
         key = f"{city_code.lower()}_{file_type}"
-        df = _process_csv(csv_path, file_type, "current", city_code)
+        df = _process_csv(csv_path, file_type, current_season, city_code)
         if not df.empty:
             results[key] = df
 
-    logger.info("Current period: processed %d file(s)", len(results))
+    logger.info("Current period (tagged as %s): processed %d file(s)", current_season, len(results))
     return results
