@@ -37,6 +37,7 @@ def roc_date_to_ad(roc_date) -> Optional[date]:
 
     Input format: "1130715" → year=113+1911=2024, month=07, day=15.
     Returns None for empty, malformed, or out-of-range values.
+    Rejects ROC years outside 90–120 (AD 2001–2031) as likely parse errors.
     """
     if pd.isna(roc_date):
         return None
@@ -45,7 +46,13 @@ def roc_date_to_ad(roc_date) -> Optional[date]:
         return None
     try:
         # The year part is everything except the last 4 digits (MMDD).
-        year = int(s[:-4]) + 1911
+        roc_year = int(s[:-4])
+        # Validate ROC year range: real estate data spans ~民國90年 (2001) to
+        # ~民國120年 (2031). Values outside this are almost certainly parse
+        # errors (e.g. "1041231" misread as year=1, month=04, day=12).
+        if roc_year < 90 or roc_year > 120:
+            return None
+        year = roc_year + 1911
         month = int(s[-4:-2])
         day = int(s[-2:])
         return date(year, month, day)
