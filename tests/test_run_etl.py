@@ -43,7 +43,7 @@ SSL_ERROR = {"error": "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify faile
 # ------------------------------------------------------------------
 
 @pytest.mark.parametrize("overall, expected", [
-    ({}, run_etl.EXIT_OK),
+    ({}, run_etl.EXIT_ALL_FAILED),  # nothing processed is not a success
     ({"114S1": OK}, run_etl.EXIT_OK),
     ({"114S1": SKIPPED, "114S2": OK}, run_etl.EXIT_OK),
     ({"114S1": SSL_ERROR}, run_etl.EXIT_ALL_FAILED),

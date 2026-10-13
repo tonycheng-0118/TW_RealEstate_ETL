@@ -214,6 +214,8 @@ def season_status(info: dict) -> str:
 def etl_exit_code(overall: dict) -> int:
     """Map the run_etl() summary to an exit code (see module docstring)."""
     statuses = [season_status(info) for info in overall.values()]
+    if not statuses:
+        return EXIT_ALL_FAILED  # nothing ran; all([]) would read as success
     if all(s == "ok" for s in statuses):
         return EXIT_OK
     if all(s == "failed" for s in statuses):

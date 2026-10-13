@@ -60,6 +60,7 @@ ZIP 內含各縣市 CSV，檔名格式：`{縣市代碼小寫}_lvr_land_{類型}
 - macOS（已於 Mac mini M4 驗證）
 - Python 3.12+
 - PostgreSQL 17（`brew install postgresql@17`）
+- `curl`（macOS 內建；下載用）
 - Node.js（MCP server 需要 `npx`）
 
 ### 安裝
@@ -195,7 +196,9 @@ TW_RealEstate_ETL/
 │   └── tw-realestate-etl/
 │       └── SKILL.md          # Claude Code 統一技能（7 操作：help/init/run/query/status/backup/schedule）
 ├── tests/
-│   └── test_transform.py     # 單元測試
+│   ├── test_transform.py     # 單元測試
+│   ├── test_run_etl.py       # exit code、備份、下載、etl_log 過濾
+│   └── fixtures/             # 測試用的真實回應樣本
 ├── logs/                     # 執行日誌（gitignore）
 └── data/                     # 下載的 ZIP/CSV（gitignore）
 ```
