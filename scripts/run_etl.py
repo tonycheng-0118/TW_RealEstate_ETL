@@ -12,6 +12,12 @@ CLI usage:
     python scripts/run_etl.py --start 114S1 --end 114S1 --city J      # 指定新竹縣
     python scripts/run_etl.py --start 111S1 --end 112S4 --city J,H    # 多縣市
     python scripts/run_etl.py --backup-only
+
+Exit codes:
+    0  every season downloaded and loaded (and backup succeeded, if run)
+    1  some seasons failed, or the backup failed; backup still ran
+    3  every season failed; backup skipped so a good backup is not rotated out
+    2  invalid arguments (argparse)
 """
 
 import argparse
@@ -59,6 +65,14 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+EXIT_OK = 0
+EXIT_PARTIAL_FAILURE = 1
+EXIT_ALL_FAILED = 3
+
+# etl_log file_name prefix for current-period loads. Keeps them from marking
+# the season's own file as loaded, so the full seasonal ZIP still loads later.
+CURRENT_LOG_PREFIX = "current/"
+
 
 def setup_logging():
     """Configure logging to both console and log file."""
@@ -82,11 +96,14 @@ def setup_logging():
     root.addHandler(ch)
 
 
-def _load_dataframes(dataframes: dict, season: str, conn) -> dict:
+def _load_dataframes(dataframes: dict, season: str, conn, is_current: bool = False) -> dict:
     """Load all DataFrames for a season into the database.
 
     Returns a summary dict: {file_name: {"rows": int, "status": str}}.
     Each file is processed independently — a failure in one does not block others.
+
+    Current-period loads never skip: each release (1st/11th/21st) carries new
+    rows under the same season tag, and the upsert is idempotent.
     """
     summary = {}
     for key, df in dataframes.items():
@@ -95,9 +112,11 @@ def _load_dataframes(dataframes: dict, season: str, conn) -> dict:
         city_code = parts[0]
         file_type = parts[1]
         file_name = f"{city_code}_lvr_land_{file_type}.csv"
+        if is_current:
+            file_name = CURRENT_LOG_PREFIX + file_name
 
         # Check if this file was already successfully loaded for this season.
-        if check_already_loaded(season, file_name, conn):
+        if not is_current and check_already_loaded(season, file_name, conn):
             logger.info("Already loaded %s/%s, skipping", season, file_name)
             summary[file_name] = {"rows": 0, "status": "skipped"}
             continue
@@ -144,7 +163,7 @@ def run_etl(seasons: list[str], is_current: bool = False) -> dict:
             try:
                 download_current()
                 dataframes = process_current()
-                summary = _load_dataframes(dataframes, current_season, conn)
+                summary = _load_dataframes(dataframes, current_season, conn, is_current=True)
                 overall[current_season] = summary
             except Exception as e:
                 logger.error("Failed to process current period: %s", e, exc_info=True)
@@ -171,7 +190,24 @@ def run_etl(seasons: list[str], is_current: bool = False) -> dict:
     return overall
 
 
-def main():
+def season_failed(info: dict) -> bool:
+    """True if a season's download/transform raised or any file failed to load."""
+    if "error" in info:
+        return True
+    return any(detail["status"] == "failed" for detail in info.values())
+
+
+def etl_exit_code(overall: dict) -> int:
+    """Map the run_etl() summary to an exit code (see module docstring)."""
+    failed = [season for season, info in overall.items() if season_failed(info)]
+    if not failed:
+        return EXIT_OK
+    if len(failed) == len(overall):
+        return EXIT_ALL_FAILED
+    return EXIT_PARTIAL_FAILURE
+
+
+def main() -> int:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
         description="TW RealEstate ETL — Download, transform, load, and backup"
@@ -199,6 +235,7 @@ def main():
             logger.info("City override: %s", config.TARGET_CITY_CODES)
 
     logger.info("TW_RealEstate_ETL started at %s", datetime.now().isoformat())
+    exit_code = EXIT_OK
 
     # --- ETL ---
     if not args.backup_only:
@@ -236,18 +273,24 @@ def main():
                 for fname, detail in info.items():
                     logger.info("  %s/%s: %s (%d rows)", season, fname, detail["status"], detail["rows"])
 
+        exit_code = etl_exit_code(overall)
+
     # --- Backup ---
-    if not args.skip_backup:
+    if exit_code == EXIT_ALL_FAILED:
+        logger.error("All seasons failed — skipping backup to keep existing backups")
+    elif not args.skip_backup:
         logger.info("=== Running backup ===")
         try:
             backup_path = backup_database()
             logger.info("Backup saved to: %s", backup_path)
         except Exception as e:
             logger.error("Backup failed: %s", e, exc_info=True)
+            exit_code = exit_code or EXIT_PARTIAL_FAILURE
 
-    logger.info("TW_RealEstate_ETL finished at %s", datetime.now().isoformat())
+    logger.info("TW_RealEstate_ETL finished at %s (exit %d)", datetime.now().isoformat(), exit_code)
+    return exit_code
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
 

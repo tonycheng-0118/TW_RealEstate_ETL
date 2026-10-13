@@ -19,7 +19,7 @@
 
 | 類型 | 端點 | 說明 |
 |------|------|------|
-| 歷史按季 | `plvr.land.moi.gov.tw/DownloadSeason?season={season}` | 101 年起，可直接 `requests.get` |
+| 歷史按季 | `plvr.land.moi.gov.tw/DownloadSeason?season={season}` | 101 年起；用系統 `curl` 下載（Python 3.13+ 的 `requests` 不接受此站的 TWCA 憑證鏈） |
 | 當期 | `plvr.land.moi.gov.tw/Download?type=zip&fileName=lvr_landcsv.zip` | 每月 1、11、21 日更新 |
 
 ZIP 內含各縣市 CSV，檔名格式：`{縣市代碼小寫}_lvr_land_{類型}.csv`
@@ -127,6 +127,16 @@ python scripts/run_etl.py --start 114S1 --end 114S1 --skip-backup
 **季度格式**：`{民國年}S{季度}`，例如 `113S1` = 2024 Q1、`114S4` = 2025 Q4
 
 > `source_season` 永遠使用實際季度號（如 `115S2`），不再使用 `current` 字串。
+> 當期資料在 `etl_log` 記成 `current/{檔名}`，每次都重新 upsert（每月 1、11、21 日各一批），也不會擋到該季日後的整季匯入。
+
+**Exit code：**
+
+| exit | 意義 |
+|------|------|
+| 0 | 全部成功（有跑備份就含備份成功） |
+| 1 | 部分季失敗或備份失敗；備份仍有跑 |
+| 3 | 每一季都失敗；不跑備份，避免把好的備份輪掉 |
+| 2 | 參數錯誤 |
 
 ### 刪除資料
 
@@ -148,13 +158,14 @@ python scripts/delete.py --start 113S2 --end 113S2 --city A
 
 ```bash
 # 先編輯 plist，將 /path/to/TW_RealEstate_ETL 替換為你的實際路徑
+# 預設只跑當期；要指定縣市就在 ProgramArguments 加 --city 與 D,J,O
 cp launchd/com.tw-realestate.etl.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.tw-realestate.etl.plist
 
 # 手動觸發一次（測試用）
 launchctl start com.tw-realestate.etl
 
-# 確認狀態
+# 確認狀態（第二欄是上次的 exit code）
 launchctl list | grep tw-realestate
 ```
 
