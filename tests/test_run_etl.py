@@ -8,6 +8,7 @@ Run with: python -m pytest tests/ -v
 Live download test: RUN_NETWORK_TESTS=1 python -m pytest tests/test_run_etl.py -k live
 """
 
+import logging
 import os
 import sys
 import zipfile
@@ -17,7 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
-from scripts import download, run_etl
+from scripts import delete, download, run_etl
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -76,6 +77,9 @@ def etl_env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr(config, "BACKUP_DIR", tmp_path / "backups")
     monkeypatch.setattr(config, "DOWNLOAD_DELAY_SEC", 0)
+    monkeypatch.setattr(config, "TARGET_CITY_CODES", config.TARGET_CITY_CODES)  # main() --city overrides it
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "handlers", list(root.handlers))  # setup_logging() adds handlers
     monkeypatch.setattr(run_etl, "get_connection", lambda: FakeConn())
 
     backups = []
@@ -268,3 +272,29 @@ def test_live_download_season(tmp_path, monkeypatch):
     assert target.stat().st_size > 1_000_000  # 115S2 was 14.7 MB on 2026-10-13
     with zipfile.ZipFile(target) as zf:
         assert any(n.lower().endswith("_lvr_land_a.csv") for n in zf.namelist())
+
+
+# ------------------------------------------------------------------
+# delete.py: etl_log city filter must match both file_name formats
+# ------------------------------------------------------------------
+
+def _like(pattern: str, value: str) -> bool:
+    """Minimal SQL LIKE (% and _) for checking patterns without a DB."""
+    import re
+    regex = "".join(".*" if ch == "%" else "." if ch == "_" else re.escape(ch) for ch in pattern)
+    return re.fullmatch(regex, value) is not None
+
+
+@pytest.mark.parametrize("city_codes, file_name, expected", [
+    (["D"], "d_lvr_land_a.csv", True),            # CLI upper-cases --city
+    (["d"], "d_lvr_land_a.csv", True),
+    (["D"], "current/d_lvr_land_c.csv", True),
+    (["D"], "j_lvr_land_a.csv", False),
+    (["D"], "current/j_lvr_land_a.csv", False),
+    (["D", "J"], "current/j_lvr_land_b.csv", True),
+])
+def test_etl_log_city_filter(city_codes, file_name, expected):
+    sql, params = delete.etl_log_city_filter(city_codes)
+
+    assert sql.count("%s") == len(params)
+    assert any(_like(p, file_name) for p in params) == expected

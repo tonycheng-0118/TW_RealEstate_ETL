@@ -235,7 +235,7 @@ psql -h <db_host> -p <db_port> -U <db_user> -d <db_name> -c "
   SELECT season, file_name, row_count, finished_at
   FROM etl_log
   WHERE status = 'success'
-    AND file_name LIKE '<city_code>_%'
+    AND (file_name LIKE '<city_code 小寫>_%' OR file_name LIKE 'current/<city_code 小寫>_%')
   ORDER BY finished_at DESC LIMIT 5;
 "
 ```
@@ -488,7 +488,7 @@ ls -la ~/Library/LaunchAgents/com.tw-realestate.etl.plist 2>/dev/null
 | 欄位 | 說明 |
 |------|------|
 | season | 季度 e.g. 113S4 |
-| file_name | 來源檔名 e.g. j_lvr_land_a.csv |
+| file_name | 來源檔名 e.g. j_lvr_land_a.csv；當期資料為 current/j_lvr_land_a.csv |
 | row_count | 匯入筆數 |
 | status | success / failed |
 | finished_at | 完成時間 |
