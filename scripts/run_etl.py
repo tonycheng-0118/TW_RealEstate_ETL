@@ -15,7 +15,8 @@ CLI usage:
 
 Exit codes:
     0  every season downloaded and loaded (and backup succeeded, if run)
-    1  some seasons failed, or the backup failed; backup still ran
+    1  some seasons (or some files) failed, or the backup failed; backup still ran.
+       An uncaught error (e.g. DB unreachable) also exits 1, without a backup.
     3  every season failed; backup skipped so a good backup is not rotated out
     2  invalid arguments (argparse)
 """
@@ -142,6 +143,14 @@ def _load_dataframes(dataframes: dict, season: str, conn, is_current: bool = Fal
     return summary
 
 
+def _require_data(dataframes: dict, season: str) -> None:
+    """Fail the season when the ZIP held no rows for the target cities."""
+    if not dataframes:
+        raise RuntimeError(
+            f"No rows for target cities {config.TARGET_CITY_CODES} in {season}"
+        )
+
+
 def run_etl(seasons: list[str], is_current: bool = False) -> dict:
     """Run the full ETL pipeline for a list of seasons.
 
@@ -163,6 +172,7 @@ def run_etl(seasons: list[str], is_current: bool = False) -> dict:
             try:
                 download_current()
                 dataframes = process_current()
+                _require_data(dataframes, current_season)
                 summary = _load_dataframes(dataframes, current_season, conn, is_current=True)
                 overall[current_season] = summary
             except Exception as e:
@@ -174,6 +184,7 @@ def run_etl(seasons: list[str], is_current: bool = False) -> dict:
                 try:
                     download_season(season)
                     dataframes = process_season(season)
+                    _require_data(dataframes, season)
                     summary = _load_dataframes(dataframes, season, conn)
                     overall[season] = summary
                 except Exception as e:
@@ -190,19 +201,22 @@ def run_etl(seasons: list[str], is_current: bool = False) -> dict:
     return overall
 
 
-def season_failed(info: dict) -> bool:
-    """True if a season's download/transform raised or any file failed to load."""
+def season_status(info: dict) -> str:
+    """Classify one season's summary as 'ok', 'partial' (some files failed) or 'failed'."""
     if "error" in info:
-        return True
-    return any(detail["status"] == "failed" for detail in info.values())
+        return "failed"
+    statuses = [detail["status"] for detail in info.values()]
+    if "failed" not in statuses:
+        return "ok"
+    return "failed" if all(s == "failed" for s in statuses) else "partial"
 
 
 def etl_exit_code(overall: dict) -> int:
     """Map the run_etl() summary to an exit code (see module docstring)."""
-    failed = [season for season, info in overall.items() if season_failed(info)]
-    if not failed:
+    statuses = [season_status(info) for info in overall.values()]
+    if all(s == "ok" for s in statuses):
         return EXIT_OK
-    if len(failed) == len(overall):
+    if all(s == "failed" for s in statuses):
         return EXIT_ALL_FAILED
     return EXIT_PARTIAL_FAILURE
 
@@ -277,7 +291,7 @@ def main() -> int:
 
     # --- Backup ---
     if exit_code == EXIT_ALL_FAILED:
-        logger.error("All seasons failed — skipping backup to keep existing backups")
+        logger.error("Every season failed — skipping backup to keep existing backups")
     elif not args.skip_backup:
         logger.info("=== Running backup ===")
         try:

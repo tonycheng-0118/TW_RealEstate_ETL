@@ -44,7 +44,8 @@ def etl_log_city_filter(city_codes: list[str]) -> tuple[str, list[str]]:
     """
     params = []
     for c in city_codes:
-        params += [f"{c.lower()}_%", f"current/{c.lower()}_%"]
+        # Escape '_' (a LIKE wildcard): 'c_%' would match every 'current/...' row.
+        params += [f"{c.lower()}\\_%", f"current/{c.lower()}\\_%"]
     conditions = " OR ".join(["file_name LIKE %s"] * len(params))
     return f" AND ({conditions})", params
 

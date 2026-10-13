@@ -29,6 +29,10 @@ FILE_FAILED = {
     "d_lvr_land_a.csv": {"rows": 10, "status": "success"},
     "d_lvr_land_c.csv": {"rows": 0, "status": "failed"},
 }
+ALL_FILES_FAILED = {
+    "d_lvr_land_a.csv": {"rows": 0, "status": "failed"},
+    "d_lvr_land_c.csv": {"rows": 0, "status": "failed"},
+}
 # Error text copied from the 2026-10-13 run on Python 3.14 (TW_RealEstate_ETL#4).
 SSL_ERROR = {"error": "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
                       "Missing Subject Key Identifier (_ssl.c:1081)"}
@@ -42,10 +46,11 @@ SSL_ERROR = {"error": "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify faile
     ({}, run_etl.EXIT_OK),
     ({"114S1": OK}, run_etl.EXIT_OK),
     ({"114S1": SKIPPED, "114S2": OK}, run_etl.EXIT_OK),
-    ({"114S1": {}}, run_etl.EXIT_OK),  # season had no target-city CSVs
     ({"114S1": SSL_ERROR}, run_etl.EXIT_ALL_FAILED),
     ({"114S1": SSL_ERROR, "114S2": SSL_ERROR}, run_etl.EXIT_ALL_FAILED),
-    ({"114S1": FILE_FAILED}, run_etl.EXIT_ALL_FAILED),
+    ({"114S1": ALL_FILES_FAILED}, run_etl.EXIT_ALL_FAILED),
+    ({"114S1": FILE_FAILED}, run_etl.EXIT_PARTIAL_FAILURE),  # current mode: one unit, some files loaded
+    ({"114S1": ALL_FILES_FAILED, "114S2": SSL_ERROR}, run_etl.EXIT_ALL_FAILED),
     ({"114S1": OK, "114S2": SSL_ERROR}, run_etl.EXIT_PARTIAL_FAILURE),
     ({"114S1": OK, "114S2": FILE_FAILED}, run_etl.EXIT_PARTIAL_FAILURE),
 ])
@@ -109,14 +114,20 @@ def test_main_all_downloads_fail_exits_nonzero_without_backup(etl_env, monkeypat
     assert not config.BACKUP_DIR.exists() or list(config.BACKUP_DIR.iterdir()) == []
 
 
+def _stub_season_pipeline(monkeypatch, download=lambda season: None):
+    """Download/transform/load stubs where every season yields one loaded file."""
+    monkeypatch.setattr(run_etl, "download_season", download)
+    monkeypatch.setattr(run_etl, "process_season", lambda season: {"d_a": object()})
+    monkeypatch.setattr(run_etl, "_load_dataframes", lambda dataframes, season, conn, is_current=False: dict(OK))
+
+
 def test_main_partial_failure_exits_nonzero_and_still_backs_up(etl_env, monkeypatch):
     def fake_download(season):
         if season == "114S2":
             raise RuntimeError("Downloaded file for 114S2 is not a valid ZIP.")
         return config.DATA_DIR / f"{season}.zip"
 
-    monkeypatch.setattr(run_etl, "download_season", fake_download)
-    monkeypatch.setattr(run_etl, "process_season", lambda season: {})
+    _stub_season_pipeline(monkeypatch, download=fake_download)
     monkeypatch.setattr(sys, "argv", ["run_etl.py", "--start", "114S1", "--end", "114S2"])
 
     assert run_etl.main() == run_etl.EXIT_PARTIAL_FAILURE
@@ -124,8 +135,7 @@ def test_main_partial_failure_exits_nonzero_and_still_backs_up(etl_env, monkeypa
 
 
 def test_main_all_succeed_exits_zero_and_backs_up(etl_env, monkeypatch):
-    monkeypatch.setattr(run_etl, "download_season", lambda season: None)
-    monkeypatch.setattr(run_etl, "process_season", lambda season: {})
+    _stub_season_pipeline(monkeypatch)
     monkeypatch.setattr(sys, "argv", ["run_etl.py", "--start", "114S1", "--end", "114S2"])
 
     assert run_etl.main() == run_etl.EXIT_OK
@@ -136,8 +146,7 @@ def test_main_backup_failure_exits_nonzero(etl_env, monkeypatch):
     def broken_backup():
         raise RuntimeError("pg_dump failed (rc=1)")
 
-    monkeypatch.setattr(run_etl, "download_season", lambda season: None)
-    monkeypatch.setattr(run_etl, "process_season", lambda season: {})
+    _stub_season_pipeline(monkeypatch)
     monkeypatch.setattr(run_etl, "backup_database", broken_backup)
     monkeypatch.setattr(sys, "argv", ["run_etl.py", "--start", "114S1", "--end", "114S1"])
 
@@ -148,6 +157,16 @@ def test_main_current_mode_download_failure_skips_backup(etl_env, monkeypatch):
     # The LaunchAgent runs with no --start/--end (current period only).
     monkeypatch.setattr(download, "fetch_to_file", _fail_fetch)
     monkeypatch.setattr(sys, "argv", ["run_etl.py", "--city", "D,J,O"])
+
+    assert run_etl.main() == run_etl.EXIT_ALL_FAILED
+    assert etl_env == []
+
+
+def test_main_no_target_city_rows_exits_nonzero_without_backup(etl_env, monkeypatch):
+    # ZIP downloaded fine but held nothing for the target cities: not a silent success.
+    monkeypatch.setattr(run_etl, "download_season", lambda season: None)
+    monkeypatch.setattr(run_etl, "process_season", lambda season: {})
+    monkeypatch.setattr(sys, "argv", ["run_etl.py", "--start", "114S1", "--end", "114S1", "--city", "D"])
 
     assert run_etl.main() == run_etl.EXIT_ALL_FAILED
     assert etl_env == []
@@ -279,9 +298,18 @@ def test_live_download_season(tmp_path, monkeypatch):
 # ------------------------------------------------------------------
 
 def _like(pattern: str, value: str) -> bool:
-    """Minimal SQL LIKE (% and _) for checking patterns without a DB."""
+    """Minimal PostgreSQL LIKE (% and _, backslash escape) for checking patterns without a DB."""
     import re
-    regex = "".join(".*" if ch == "%" else "." if ch == "_" else re.escape(ch) for ch in pattern)
+    regex, chars = "", iter(pattern)
+    for ch in chars:
+        if ch == "\\":
+            regex += re.escape(next(chars))
+        elif ch == "%":
+            regex += ".*"
+        elif ch == "_":
+            regex += "."
+        else:
+            regex += re.escape(ch)
     return re.fullmatch(regex, value) is not None
 
 
@@ -292,6 +320,8 @@ def _like(pattern: str, value: str) -> bool:
     (["D"], "j_lvr_land_a.csv", False),
     (["D"], "current/j_lvr_land_a.csv", False),
     (["D", "J"], "current/j_lvr_land_b.csv", True),
+    (["C"], "current/d_lvr_land_a.csv", False),   # '_' must not act as a wildcard
+    (["C"], "c_lvr_land_a.csv", True),
 ])
 def test_etl_log_city_filter(city_codes, file_name, expected):
     sql, params = delete.etl_log_city_filter(city_codes)

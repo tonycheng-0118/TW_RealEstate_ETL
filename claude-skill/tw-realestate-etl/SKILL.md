@@ -210,9 +210,9 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
 | exit | 意義 |
 |------|------|
 | 0 | 全部成功（含備份） |
-| 1 | 部分季失敗或備份失敗；備份仍有跑 |
+| 1 | 部分季（或部分檔）失敗、備份失敗；備份仍有跑。DB 連不上等未預期錯誤也是 1，但沒跑備份 |
 | 2 | 參數錯誤 |
-| 3 | 每一季都失敗；**沒跑備份**（避免把好的備份輪掉） |
+| 3 | 每一季都失敗（含目標縣市沒有資料）；**沒跑備份**（避免把好的備份輪掉） |
 
 尚未公布的季下載會拿到 HTML 而失敗：和其他季一起跑是 exit 1，只跑這一季是 exit 3（不備份）。
 
@@ -235,7 +235,7 @@ psql -h <db_host> -p <db_port> -U <db_user> -d <db_name> -c "
   SELECT season, file_name, row_count, finished_at
   FROM etl_log
   WHERE status = 'success'
-    AND (file_name LIKE '<city_code 小寫>_%' OR file_name LIKE 'current/<city_code 小寫>_%')
+    AND (file_name LIKE '<city_code 小寫>\\_%' OR file_name LIKE 'current/<city_code 小寫>\\_%')
   ORDER BY finished_at DESC LIMIT 5;
 "
 ```
