@@ -5,6 +5,10 @@ Downloads seasonal or current real estate transaction data as ZIP files.
 Validates each download by checking ZIP magic bytes (PK\x03\x04).
 Skips files that already exist and are valid ZIPs.
 
+Downloads go through the system `curl`: on Python 3.13+, `requests` rejects
+the site's TWCA certificate chain ("Missing Subject Key Identifier"), while
+curl verifies the chain and hostname with the OS TLS stack and accepts it.
+
 CLI usage:
     python scripts/download.py --season 113S4
     python scripts/download.py --from 112S1 --to 114S1
@@ -13,11 +17,10 @@ CLI usage:
 
 import argparse
 import logging
+import subprocess
 import sys
 import time
 from pathlib import Path
-
-import requests
 
 # Allow running as `python scripts/download.py` from project root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -27,6 +30,12 @@ logger = logging.getLogger(__name__)
 
 # ZIP file magic bytes — first 4 bytes of any valid ZIP archive.
 ZIP_MAGIC = b"PK\x03\x04"
+
+# Abort a transfer that stays below SPEED_LIMIT bytes/s for SPEED_TIME seconds
+# (stall detection, like the old requests read timeout of 120s).
+CONNECT_TIMEOUT_SEC = 30
+SPEED_LIMIT_BPS = 1024
+SPEED_TIME_SEC = 120
 
 
 def parse_season(s: str) -> tuple[int, int]:
@@ -63,6 +72,32 @@ def parse_season_range(from_s: str, to_s: str) -> list[str]:
     return seasons
 
 
+def fetch_to_file(url: str, dest: Path) -> None:
+    """Download url into dest with curl (full certificate verification).
+
+    Raises RuntimeError on any curl failure (TLS, HTTP >= 400, timeout);
+    a partially written dest is removed.
+    """
+    cmd = [
+        "curl",
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--location",
+        "--connect-timeout", str(CONNECT_TIMEOUT_SEC),
+        "--speed-limit", str(SPEED_LIMIT_BPS),
+        "--speed-time", str(SPEED_TIME_SEC),
+        "--output", str(dest),
+        url,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        dest.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"curl failed (rc={result.returncode}) for {url}: {result.stderr.strip()}"
+        )
+
+
 def is_valid_zip(filepath: Path) -> bool:
     """Check if a file starts with ZIP magic bytes."""
     if not filepath.exists() or filepath.stat().st_size < 4:
@@ -90,14 +125,9 @@ def download_season(season: str) -> Path:
     url = config.SEASON_URL_TEMPLATE.format(season=season)
     logger.info("Downloading season %s from %s", season, url)
 
-    resp = requests.get(url, timeout=120, stream=True)
-    resp.raise_for_status()
-
     # Write to a temp file first, then rename (atomic-ish on same filesystem).
     tmp = target.with_suffix(".tmp")
-    with open(tmp, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=8192):
-            f.write(chunk)
+    fetch_to_file(url, tmp)
 
     # Validate the downloaded content is actually a ZIP.
     if not is_valid_zip(tmp):
@@ -122,13 +152,8 @@ def download_current() -> Path:
     target = config.DATA_DIR / "current.zip"
 
     logger.info("Downloading current period from %s", config.CURRENT_URL)
-    resp = requests.get(config.CURRENT_URL, timeout=120, stream=True)
-    resp.raise_for_status()
-
     tmp = target.with_suffix(".tmp")
-    with open(tmp, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=8192):
-            f.write(chunk)
+    fetch_to_file(config.CURRENT_URL, tmp)
 
     if not is_valid_zip(tmp):
         tmp.unlink(missing_ok=True)

@@ -35,6 +35,21 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def etl_log_city_filter(city_codes: list[str]) -> tuple[str, list[str]]:
+    """SQL fragment + params matching etl_log rows for the given city codes.
+
+    etl_log file_name is '{city}_lvr_land_{type}.csv' (lowercase city) for
+    seasonal loads and 'current/{city}_lvr_land_{type}.csv' for current-period
+    loads (run_etl.CURRENT_LOG_PREFIX).
+    """
+    params = []
+    for c in city_codes:
+        # Escape '_' (a LIKE wildcard): 'c_%' would match every 'current/...' row.
+        params += [f"{c.lower()}\\_%", f"current/{c.lower()}\\_%"]
+    conditions = " OR ".join(["file_name LIKE %s"] * len(params))
+    return f" AND ({conditions})", params
+
+
 def count_records(season: str, city_codes: list[str] | None, conn) -> dict:
     """Count records that will be deleted (dry-run preview)."""
     counts = {}
@@ -53,10 +68,9 @@ def count_records(season: str, city_codes: list[str] | None, conn) -> dict:
     sql = "SELECT COUNT(*) FROM etl_log WHERE season = %s"
     params = [season]
     if city_codes:
-        # etl_log file_name format: '{city_code}_lvr_land_{type}.csv'
-        conditions = " OR ".join(["file_name LIKE %s"] * len(city_codes))
-        sql += f" AND ({conditions})"
-        params.extend([f"{c}_%%" for c in city_codes])
+        city_sql, city_params = etl_log_city_filter(city_codes)
+        sql += city_sql
+        params.extend(city_params)
     with conn.cursor() as cur:
         cur.execute(sql, params)
         counts["etl_log"] = cur.fetchone()[0]
@@ -85,9 +99,9 @@ def delete_records(season: str, city_codes: list[str] | None, conn) -> dict:
     sql = "DELETE FROM etl_log WHERE season = %s"
     params = [season]
     if city_codes:
-        conditions = " OR ".join(["file_name LIKE %s"] * len(city_codes))
-        sql += f" AND ({conditions})"
-        params.extend([f"{c}_%%" for c in city_codes])
+        city_sql, city_params = etl_log_city_filter(city_codes)
+        sql += city_sql
+        params.extend(city_params)
     with conn.cursor() as cur:
         cur.execute(sql, params)
         deleted["etl_log"] = cur.rowcount

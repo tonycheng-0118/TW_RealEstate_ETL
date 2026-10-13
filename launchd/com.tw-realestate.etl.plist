@@ -16,11 +16,12 @@
     <key>Label</key>
     <string>com.tw-realestate.etl</string>
 
+    <!-- No --start/--end = current period only. Add "<string>--city</string><string>D,J,O</string>"
+         to override TARGET_CITY_CODES. Exit codes: 0 ok, 1 partial failure, 3 all failed (no backup). -->
     <key>ProgramArguments</key>
     <array>
         <string>/path/to/TW_RealEstate_ETL/.venv/bin/python</string>
         <string>/path/to/TW_RealEstate_ETL/scripts/run_etl.py</string>
-        <string>--current</string>
     </array>
 
     <key>WorkingDirectory</key>

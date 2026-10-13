@@ -77,7 +77,7 @@ CONFIG_FILE=$SKILL_ROOT/config.json
   query <描述>                  查詢實價登錄（自然語言）
   status                        查看 DB 狀態與匯入紀錄
   backup                        手動備份資料庫
-  schedule <install|uninstall|status>  管理 macOS LaunchAgent 排程
+  schedule <install [city]|uninstall|status>  管理 macOS LaunchAgent 排程
 
 範例:
   /tw-realestate-etl init
@@ -109,17 +109,18 @@ CONFIG_FILE=$SKILL_ROOT/config.json
 ### Step 1: 檢查前置需求
 
 ```bash
-which python3 && which psql && which pg_dump
+which python3 && which psql && which pg_dump && which curl
 ```
 
 - `python3` 不存在 → 提示安裝（`brew install python` 或從 python.org）
 - `psql` / `pg_dump` 不存在 → 提示 `brew install postgresql@17`
+- `curl` 不存在 → 提示 `brew install curl`（`download.py` 用它下載）
 - 全部存在 → 繼續
 
 ### Step 2: 安裝 Python 依賴
 
 ```bash
-pip3 install pandas psycopg2-binary requests python-dotenv
+pip3 install pandas psycopg2-binary python-dotenv
 ```
 
 ### Step 3: 互動問答
@@ -178,10 +179,14 @@ psql -d <db_name> -f ~/.claude/skills/tw-realestate-etl/sql/schema.sql
 
 從 `$ARGUMENTS` 中解析（去掉開頭的 `run`）：
 
-- `run 114S1` → season=114S1, city=config 預設
-- `run 114S1 D` → season=114S1, city=D
-- `run 112S1-114S1 D,A` → from=112S1, to=114S1, city=D,A
-- `run current` → current mode
+| 輸入 | `<flags>` |
+|------|-----------|
+| `run 114S1 [city]` | `--start 114S1 --end 114S1`（季別是當季時改抓「本期」資料） |
+| `run 112S1-114S1 [city]` | `--start 112S1 --end 114S1`（`end` 是當季時，當季改抓「本期」資料） |
+| `run 113S1-current [city]` | `--start 113S1` |
+| `run current [city]` | （不帶） |
+
+有 city（如 `D` 或 `D,A`）就加 `--city <city>`，沒有就用 config 預設。
 
 ### 執行 ETL
 
@@ -198,15 +203,18 @@ REALPRICE_TARGET_CITIES=<cities> \
 python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
 ```
 
-其中 `<flags>` 根據參數組合：
-- 單季：`--season 114S1`
-- 範圍：`--from 112S1 --to 114S1`
-- 當期：`--current`
-- 指定縣市：加上 `--city D` 或 `--city D,A`
-
 ### 回報結果
 
-顯示每個檔案的匯入狀態（成功/跳過/失敗）和筆數摘要。
+顯示每個檔案的匯入狀態（成功/跳過/失敗）和筆數摘要，並依 exit code 回報：
+
+| exit | 意義 |
+|------|------|
+| 0 | 全部成功（含備份） |
+| 1 | 部分季（或部分檔）失敗、備份失敗；備份仍有跑。DB 連不上等未預期錯誤也是 1，但沒跑備份 |
+| 2 | 參數錯誤 |
+| 3 | 每一季都失敗（含目標縣市沒有資料）；**沒跑備份**（避免把好的備份輪掉） |
+
+尚未公布的季下載會拿到 HTML 而失敗：和其他季一起跑是 exit 1，只跑這一季是 exit 3（不備份）。
 
 ---
 
@@ -227,7 +235,7 @@ psql -h <db_host> -p <db_port> -U <db_user> -d <db_name> -c "
   SELECT season, file_name, row_count, finished_at
   FROM etl_log
   WHERE status = 'success'
-    AND file_name LIKE '<city_code>_%'
+    AND (file_name LIKE '<city_code 小寫>\\_%' OR file_name LIKE 'current/<city_code 小寫>\\_%')
   ORDER BY finished_at DESC LIMIT 5;
 "
 ```
@@ -393,7 +401,7 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/backup.py
 
 ## 操作 6: schedule
 
-**觸發**: `schedule <install|uninstall|status>`
+**觸發**: `schedule <install [city]|uninstall|status>`
 
 ### schedule install
 
@@ -410,6 +418,7 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/backup.py
    - `/path/to/TW_RealEstate_ETL` (WorkingDirectory) → `~/.claude/skills/tw-realestate-etl`（展開為絕對路徑）
    - `/path/to/TW_RealEstate_ETL/logs/` → `~/.claude/skills/tw-realestate-etl/logs/`（展開為絕對路徑）
    - 加入 `<key>EnvironmentVariables</key>` 區段，嵌入所有 `REALPRICE_*` 環境變數
+   - 使用者指定 city 時，`ProgramArguments` 末尾加 `<string>--city</string><string><city></string>`；沒指定就靠 `REALPRICE_TARGET_CITIES`
 
 4. 寫入：
    ```bash
@@ -439,7 +448,7 @@ launchctl list | grep tw-realestate
 ls -la ~/Library/LaunchAgents/com.tw-realestate.etl.plist 2>/dev/null
 ```
 
-回報排程狀態（已安裝/未安裝、上次執行狀態）。
+回報排程狀態（已安裝/未安裝、上次執行狀態）。`launchctl list` 第二欄是上次的 exit code，對照〈操作 2: run〉的 exit code 表。
 
 ---
 
@@ -479,7 +488,7 @@ ls -la ~/Library/LaunchAgents/com.tw-realestate.etl.plist 2>/dev/null
 | 欄位 | 說明 |
 |------|------|
 | season | 季度 e.g. 113S4 |
-| file_name | 來源檔名 e.g. j_lvr_land_a.csv |
+| file_name | 來源檔名 e.g. j_lvr_land_a.csv；當期資料為 current/j_lvr_land_a.csv |
 | row_count | 匯入筆數 |
 | status | success / failed |
 | finished_at | 完成時間 |

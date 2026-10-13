@@ -19,7 +19,7 @@
 
 | 類型 | 端點 | 說明 |
 |------|------|------|
-| 歷史按季 | `plvr.land.moi.gov.tw/DownloadSeason?season={season}` | 101 年起，可直接 `requests.get` |
+| 歷史按季 | `plvr.land.moi.gov.tw/DownloadSeason?season={season}` | 101 年起；用系統 `curl` 下載（Python 3.13+ 的 `requests` 不接受此站的 TWCA 憑證鏈） |
 | 當期 | `plvr.land.moi.gov.tw/Download?type=zip&fileName=lvr_landcsv.zip` | 每月 1、11、21 日更新 |
 
 ZIP 內含各縣市 CSV，檔名格式：`{縣市代碼小寫}_lvr_land_{類型}.csv`
@@ -60,6 +60,7 @@ ZIP 內含各縣市 CSV，檔名格式：`{縣市代碼小寫}_lvr_land_{類型}
 - macOS（已於 Mac mini M4 驗證）
 - Python 3.12+
 - PostgreSQL 17（`brew install postgresql@17`）
+- `curl`（macOS 內建；下載用）
 - Node.js（MCP server 需要 `npx`）
 
 ### 安裝
@@ -127,6 +128,16 @@ python scripts/run_etl.py --start 114S1 --end 114S1 --skip-backup
 **季度格式**：`{民國年}S{季度}`，例如 `113S1` = 2024 Q1、`114S4` = 2025 Q4
 
 > `source_season` 永遠使用實際季度號（如 `115S2`），不再使用 `current` 字串。
+> 當期資料在 `etl_log` 記成 `current/{檔名}`，每次都重新 upsert（每月 1、11、21 日各一批），也不會擋到該季日後的整季匯入。
+
+**Exit code：**
+
+| exit | 意義 |
+|------|------|
+| 0 | 全部成功（有跑備份就含備份成功） |
+| 1 | 部分季（或部分檔）失敗、備份失敗；備份仍有跑。DB 連不上等未預期錯誤也是 1，但沒跑備份 |
+| 3 | 每一季都失敗（含目標縣市沒有資料）；不跑備份，避免把好的備份輪掉 |
+| 2 | 參數錯誤 |
 
 ### 刪除資料
 
@@ -148,13 +159,14 @@ python scripts/delete.py --start 113S2 --end 113S2 --city A
 
 ```bash
 # 先編輯 plist，將 /path/to/TW_RealEstate_ETL 替換為你的實際路徑
+# 預設只跑當期；要指定縣市就在 ProgramArguments 加 --city 與 D,J,O
 cp launchd/com.tw-realestate.etl.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.tw-realestate.etl.plist
 
 # 手動觸發一次（測試用）
 launchctl start com.tw-realestate.etl
 
-# 確認狀態
+# 確認狀態（第二欄是上次的 exit code）
 launchctl list | grep tw-realestate
 ```
 
@@ -184,7 +196,9 @@ TW_RealEstate_ETL/
 │   └── tw-realestate-etl/
 │       └── SKILL.md          # Claude Code 統一技能（7 操作：help/init/run/query/status/backup/schedule）
 ├── tests/
-│   └── test_transform.py     # 單元測試
+│   ├── test_transform.py     # 單元測試
+│   ├── test_run_etl.py       # exit code、備份、下載、etl_log 過濾
+│   └── fixtures/             # 測試用的真實回應樣本
 ├── logs/                     # 執行日誌（gitignore）
 └── data/                     # 下載的 ZIP/CSV（gitignore）
 ```
@@ -221,7 +235,7 @@ TW_RealEstate_ETL/
 
 ### etl_log（ETL 紀錄）
 
-追蹤每次匯入的季度、檔案、筆數、狀態。`(season, file_name)` 為唯一鍵，防止重複匯入。
+追蹤每次匯入的季度、檔案、筆數、狀態。`(season, file_name)` 為唯一鍵，防止重複匯入；當期資料記成 `current/{檔名}`、每次都重新匯入。
 
 ## 設定
 
