@@ -86,6 +86,7 @@ def etl_env(tmp_path, monkeypatch):
     root = logging.getLogger()
     monkeypatch.setattr(root, "handlers", list(root.handlers))  # setup_logging() adds handlers
     monkeypatch.setattr(run_etl, "get_connection", lambda: FakeConn())
+    monkeypatch.setattr(run_etl, "ensure_schema", lambda conn: None)
 
     backups = []
 
@@ -196,6 +197,21 @@ def load_spy(monkeypatch):
     monkeypatch.setattr(run_etl, "upsert_rentals", fake_upsert)
     monkeypatch.setattr(run_etl, "log_etl", fake_log)
     return calls
+
+
+def test_run_etl_migrates_schema_before_loading(monkeypatch):
+    order = []
+    conn = FakeConn()
+    monkeypatch.setattr(run_etl, "get_connection", lambda: conn)
+    monkeypatch.setattr(run_etl, "ensure_schema", lambda c: order.append(("ensure_schema", c)))
+    monkeypatch.setattr(run_etl, "download_season", lambda season: None)
+    monkeypatch.setattr(run_etl, "process_season", lambda season: {"d_b": object()})
+    monkeypatch.setattr(run_etl, "_load_dataframes",
+                        lambda dataframes, season, c, is_current=False: order.append(("load", c)) or dict(OK))
+
+    run_etl.run_etl(["114S1"])
+
+    assert order == [("ensure_schema", conn), ("load", conn)]
 
 
 def test_season_load_skips_already_loaded_files(load_spy):

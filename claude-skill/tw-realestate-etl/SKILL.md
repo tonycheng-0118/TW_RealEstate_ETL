@@ -2,7 +2,7 @@
 name: tw-realestate-etl
 description: >
   台灣實價登錄 ETL 工具。支援初始化、資料下載匯入、查詢、備份、排程管理。
-  當使用者詢問不動產成交價格、房價行情、租金查詢、實價登錄相關操作時使用。
+  當使用者詢問不動產成交價格、房價行情、預售屋建案、租金查詢、實價登錄相關操作時使用。
 argument-hint: <指令> <參數> — 指令: help / init / run / query / status / backup / schedule
 ---
 
@@ -216,6 +216,16 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
 
 尚未公布的季下載會拿到 HTML 而失敗：和其他季一起跑是 exit 1，只跑這一季是 exit 3（不備份）。
 
+### 更新解約情形（已公布的季）
+
+排程只匯本期檔，匯入後才登記的解約不會回寫；季檔帶的是下載當時最新的解約情形。
+
+1. `<data_dir>/<季>.zip` 存在 → 把它和 `<data_dir>/<季>/` 改名成 `<季>.old.zip`／`<季>.old/` 保留舊版（download.py 看到 zip 就不重抓；backfill 不讀 `.old/`）。
+2. `run --start <季> --end <季>`。季檔已匯過時，upsert 會因 etl_log 已 success 而跳過，屬正常。
+3. `python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code>`：只 UPDATE `project_name`、`building_unit`、`cancel_status`。完成條件：exit 0，且最後一行 `Done:` 的 `rows_updated` > 0。
+
+`<季>` 還沒公布季檔時第 2 步會失敗（見上一段），等公布後再更新。
+
 ---
 
 ## 操作 3: query
@@ -317,6 +327,40 @@ WHERE city_code = '<city_code>'
   AND (note IS NULL OR note NOT LIKE '%親友%')
 ORDER BY transaction_date_ad DESC;
 ```
+
+#### SQL 範例 — 預售屋依建案名稱分組
+
+**預設排除已解約**（`AND cancel_status IS NULL`）；使用者要看解約就拿掉這一行。
+`cancel_status` 是 NULL 不保證未解約：解約是事後登記的，排程匯入後才解約的列仍是 NULL，越接近下載時點的季越不準。回覆要註明：112S3 以前沒有解約紀錄；近期的 NULL 可能是事後才解約、還沒更新（更新方式見〈操作 2: run〉〈更新解約情形〉）。
+`建案` 是 NULL 的那一組，是 107S1 以前、或 DB 升級前匯入還沒回補的列；出現時提示使用者跑〈更新解約情形〉第 3 步的 backfill 指令補。
+
+```sql
+SELECT
+    project_name AS 建案,
+    COUNT(*) AS 筆數,
+    MIN(transaction_date_ad) AS 最早,
+    MAX(transaction_date_ad) AS 最新,
+    ROUND(AVG((total_price - COALESCE(parking_price, 0))
+        / NULLIF(building_area - COALESCE(parking_area, 0), 0) * 3.30579)) AS 均淨單價_坪,
+    ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY total_price) / 10000) AS 總價中位數_萬,
+    MIN(address) AS 門牌範例
+FROM transactions
+WHERE city_code = '<city_code>'
+  AND district = '<district>'
+  AND source_file LIKE '%\_b.csv'
+  AND transaction_date_ad >= CURRENT_DATE - INTERVAL '1 year'
+  AND cancel_status IS NULL
+  AND (note IS NULL OR (
+      note NOT LIKE '%親友%'
+      AND note NOT LIKE '%特殊關係%'
+      AND note NOT LIKE '%受債權債務影響%'
+      AND note NOT LIKE '%二親等%'
+  ))
+GROUP BY project_name
+ORDER BY 筆數 DESC;
+```
+
+看單一建案逐戶成交：改用〈買賣成交〉範例，WHERE 加 `project_name = '<建案>'`，SELECT 加 `building_unit AS 棟及號`。
 
 #### SQL 範例 — 租金行情
 
@@ -474,6 +518,8 @@ ls -la ~/Library/LaunchAgents/com.tw-realestate.etl.plist 2>/dev/null
 | parking_price | BIGINT | 車位總價 (元) |
 | serial_no | TEXT | 編號 (唯一鍵) |
 | note | TEXT | 備註 |
+| project_name / building_unit | TEXT | 建案名稱／棟及號（預售屋；107S1 起） |
+| cancel_status | TEXT | 解約情形，如 1130116全部解約（預售屋；112S3 起才有，更早的列是 NULL，不代表未解約） |
 | source_season | TEXT | 資料季度 |
 | city_code | CHAR(1) | 縣市代碼 |
 

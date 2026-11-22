@@ -8,6 +8,7 @@ duplicate processing.
 Public API:
     get_connection()  → psycopg2 connection
     check_already_loaded(season, file_name, conn) → bool
+    ensure_schema(conn)
     upsert_transactions(df, conn) → int
     upsert_rentals(df, conn) → int
     log_etl(season, file_name, row_count, status, started_at, conn)
@@ -41,8 +42,17 @@ TRANSACTION_COLUMNS = [
     "total_price", "unit_price",
     "parking_type", "parking_area", "parking_price",
     "serial_no", "transfer_no", "note",
+    "project_name", "building_unit", "cancel_status",
     "source_file", "source_season", "city_code",
 ]
+
+# Columns added after the first release; ensure_schema() adds them to existing DBs.
+# Keep in sync with the ALTER TABLE lines in schema.sql (tests/test_presale.py checks).
+TRANSACTION_ADDED_COLUMNS = {
+    "project_name": "TEXT",
+    "building_unit": "TEXT",
+    "cancel_status": "TEXT",
+}
 
 RENTAL_COLUMNS = [
     "district", "address", "land_section", "land_number",
@@ -64,6 +74,27 @@ def get_connection():
     conn = psycopg2.connect(**config.DB_CONFIG)
     conn.autocommit = False
     return conn
+
+
+def ensure_schema(conn) -> None:
+    """Add TRANSACTION_ADDED_COLUMNS to an existing transactions table.
+
+    Idempotent. Skips silently when the table does not exist yet (schema.sql
+    creates it with the columns). Only ALTERs when a column is missing: ALTER
+    TABLE takes an ACCESS EXCLUSIVE lock even when IF NOT EXISTS makes it a no-op.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass('transactions')")
+        if cur.fetchone()[0] is None:
+            conn.commit()
+            return
+        cur.execute("SELECT attname FROM pg_attribute WHERE attrelid = 'transactions'::regclass "
+                    "AND attnum > 0 AND NOT attisdropped")
+        existing = {row[0] for row in cur.fetchall()}
+        for col, col_type in TRANSACTION_ADDED_COLUMNS.items():
+            if col not in existing:
+                cur.execute(f"ALTER TABLE IF EXISTS transactions ADD COLUMN IF NOT EXISTS {col} {col_type}")
+    conn.commit()
 
 
 def check_already_loaded(season: str, file_name: str, conn) -> bool:

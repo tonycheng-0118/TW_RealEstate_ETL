@@ -45,6 +45,7 @@ try:
     from scripts.season_utils import get_current_season, resolve_params, season_range
     from scripts.load import (
         get_connection,
+        ensure_schema,
         check_already_loaded,
         upsert_transactions,
         upsert_rentals,
@@ -57,6 +58,7 @@ except ImportError:
     from season_utils import get_current_season, resolve_params, season_range
     from load import (
         get_connection,
+        ensure_schema,
         check_already_loaded,
         upsert_transactions,
         upsert_rentals,
@@ -166,6 +168,7 @@ def run_etl(seasons: list[str], is_current: bool = False) -> dict:
     conn = get_connection()
 
     try:
+        ensure_schema(conn)
         if is_current:
             current_season = get_current_season()
             logger.info("=== Processing current period (tagged as %s) ===", current_season)
