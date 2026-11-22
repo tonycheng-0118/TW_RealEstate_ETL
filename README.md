@@ -391,7 +391,7 @@ git config core.hooksPath githooks
 - hook 用該 worktree 的 `.venv/bin/python`；沒有或缺套件時會印出建置指令、擋下 push。
 - 工作區要乾淨（含 untracked），測的就是要推的 HEAD。不 push 只想驗：`sh githooks/pre-push --manual`，成功最後一行是 `pre-push: ✓ passed`。
 - 只測 `.venv` 那一版 Python（Mac mini 是 3.14，和 launchd 排程用的 main checkout `.venv` 同版）；以前 CI 跑的 3.12／3.13 不再測，要支援舊版時手動建該版 `.venv` 跑一次。
-- **不要求 PostgreSQL**：`tests/test_presale.py` 的 DB 測試在連不上時 skip（`-rs` 會列出 skip 原因）。Mac mini 有本機 DB 所以會跑到；在沒有 DB 的機器 push 前，hook 在成功字串前會印 `pre-push: WARNING: … DB tests skipped`，代表這幾支沒測到。
+- **不要求 PostgreSQL**：`tests/test_presale.py` 的 DB 測試在連不上時 skip（`-rs` 會列出 skip 原因）。Mac mini 有本機 DB 所以會跑到；在沒有 DB 的機器 push 前，hook 在成功字串前直接探一次 DB 連線，連不上就印 `pre-push: WARNING: PostgreSQL unreachable; …`，代表這幾支沒測到（test_gate 快取命中時也會探）。
 
 ## 已知限制
 

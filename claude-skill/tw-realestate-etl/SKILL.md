@@ -542,7 +542,7 @@ ls -la ~/Library/LaunchAgents/com.tw-realestate.etl.plist 2>/dev/null
 
 回報排程狀態（已安裝/未安裝、上次執行狀態）。`launchctl list` 第二欄是上次的 exit code，對照〈操作 2: run〉的 exit code 表。
 
-plist 的 `ProgramArguments` 第一項（`plutil -p` 看）指向 `~/.claude/skills/tw-realestate-etl/` 底下的 `run_etl.py` 時（skill 版排程），它的 python 不是 `<python_path>` 展開後的路徑 → 舊版 init 裝的，排程會因缺 pandas 失敗：照〈schedule install〉重裝。指向別處的是 repo 版排程，不歸 skill 管。
+`plutil -p` 看 plist 的 `ProgramArguments`：第二項（`1 =>`）是 `~/.claude/skills/tw-realestate-etl/` 底下的 `run_etl.py`（skill 版排程），且第一項（`0 =>`，python）不是 `<python_path>` 展開後的路徑 → 舊版 init 裝的，排程會因缺 pandas 失敗：照〈schedule install〉重裝。第二項在別處的是 repo 版排程，不歸 skill 管。
 
 ---
 

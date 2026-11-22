@@ -31,7 +31,7 @@ claude
 ```
 
 ### 技術棧
-- **語言**: Python 3.12+
+- **語言**: Python 3.12–3.14（pandas==3.0.1 沒有 3.15 wheel）
 - **資料庫**: PostgreSQL 17（透過 Homebrew 安裝）
 - **排程**: macOS LaunchAgent
 - **AI 查詢**: Claude Code Skill + MCP PostgreSQL Server（可選）
