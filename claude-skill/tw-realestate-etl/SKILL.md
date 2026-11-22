@@ -2,7 +2,7 @@
 name: tw-realestate-etl
 description: >
   台灣實價登錄 ETL 工具。支援初始化、資料下載匯入、查詢、備份、排程管理。
-  當使用者詢問不動產成交價格、房價行情、租金查詢、實價登錄相關操作時使用。
+  當使用者詢問不動產成交價格、房價行情、預售屋建案、租金查詢、實價登錄相關操作時使用。
 argument-hint: <指令> <參數> — 指令: help / init / run / query / status / backup / schedule
 ---
 
@@ -320,8 +320,8 @@ ORDER BY transaction_date_ad DESC;
 
 #### SQL 範例 — 預售屋依建案名稱分組
 
-預售屋列的 `source_file` 是 `<城市>_lvr_land_b.csv`。`project_name`／`building_unit` 自 107S1 起才有、`cancel_status` 自 112S3 起才有，更早的列是 NULL。
-`cancel_status` 有值（如 `1130116全部解約`）就是已解約，**預設排除**；使用者要看解約時再拿掉這行。
+**預設排除已解約**（`AND cancel_status IS NULL`）；使用者要看解約就拿掉這一行。時間範圍早於 112S3 時，回覆要註明那段期間沒有解約紀錄。
+`建案` 是 NULL 的那一組，是 107S1 以前、或 DB 升級前匯入還沒回補的列；出現時提示使用者跑 `python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code>` 補。
 
 ```sql
 SELECT
@@ -329,7 +329,8 @@ SELECT
     COUNT(*) AS 筆數,
     MIN(transaction_date_ad) AS 最早,
     MAX(transaction_date_ad) AS 最新,
-    ROUND(AVG(unit_price * 3.30579)) AS 均單價_坪,
+    ROUND(AVG((total_price - COALESCE(parking_price, 0))
+        / NULLIF(building_area - COALESCE(parking_area, 0), 0) * 3.30579)) AS 均淨單價_坪,
     ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY total_price) / 10000) AS 總價中位數_萬,
     MIN(address) AS 門牌範例
 FROM transactions
@@ -338,11 +339,17 @@ WHERE city_code = '<city_code>'
   AND source_file LIKE '%\_b.csv'
   AND transaction_date_ad >= CURRENT_DATE - INTERVAL '1 year'
   AND cancel_status IS NULL
+  AND (note IS NULL OR (
+      note NOT LIKE '%親友%'
+      AND note NOT LIKE '%特殊關係%'
+      AND note NOT LIKE '%受債權債務影響%'
+      AND note NOT LIKE '%二親等%'
+  ))
 GROUP BY project_name
 ORDER BY 筆數 DESC;
 ```
 
-同一路段多個建案：加 `AND address LIKE '%<路段>%'`；看單一建案逐戶成交：`WHERE project_name = '<建案>'`、SELECT 加 `building_unit AS 棟及號`。
+看單一建案逐戶成交：改用〈買賣成交〉範例，WHERE 加 `project_name = '<建案>'`，SELECT 加 `building_unit AS 棟及號`。
 
 #### SQL 範例 — 租金行情
 
@@ -500,9 +507,8 @@ ls -la ~/Library/LaunchAgents/com.tw-realestate.etl.plist 2>/dev/null
 | parking_price | BIGINT | 車位總價 (元) |
 | serial_no | TEXT | 編號 (唯一鍵) |
 | note | TEXT | 備註 |
-| project_name | TEXT | 建案名稱（預售屋；107S1 起） |
-| building_unit | TEXT | 棟及號（預售屋；107S1 起） |
-| cancel_status | TEXT | 解約情形（預售屋；112S3 起，NULL＝未解約） |
+| project_name / building_unit | TEXT | 建案名稱／棟及號（預售屋；107S1 起） |
+| cancel_status | TEXT | 解約情形，如 1130116全部解約（預售屋；112S3 起才有，更早的列是 NULL，不代表未解約） |
 | source_season | TEXT | 資料季度 |
 | city_code | CHAR(1) | 縣市代碼 |
 
