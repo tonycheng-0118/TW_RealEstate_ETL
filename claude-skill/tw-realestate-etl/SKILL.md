@@ -64,6 +64,22 @@ CONFIG_FILE=$SKILL_ROOT/config.json
    exit 非 0（含 config.json 沒有 `python_path`）→ 照〈操作 1: init〉Step 2 建 `.venv`，把 `python_path` 改成 `~/.claude/skills/tw-realestate-etl/.venv/bin/python`，重跑上面的指令，exit 0 才往下。
    Bash 指令裡的 `<python_path>` 照 config.json 原字串（`~` 開頭可直接當指令；plist 例外，見〈schedule install〉第 2 步）。系統 python3 多半沒裝 pandas。
 
+### 備份保留份數比對（run、backup 前）
+
+backup.py（`run` 匯入成功後也會呼叫）備份完會刪掉 `<backup_dir>` 裡較舊的 `tw_realestate_*.sql.gz`，只留最新 `<backup_keep_count>` 份（0＝全留），不分是誰寫的。repo 版排程和 skill 寫同一個資料夾、份數又不同時，跑一次就會把排程留下的舊檔輪掉。
+（2026-11-22 Mac mini：repo `.env` 為 0、config.json 為 4，同一資料夾，skill 版 backup 刪了 4 份舊備份；TW_RealEstate_ETL Issue #10。）
+
+1. `<backup_keep_count>` 是 0 → 不會刪檔，跳過本節。
+2. 找 repo 版排程：讀 `~/Library/LaunchAgents/com.tw-realestate.etl.plist`（`plutil -p`）。不存在，或 `ProgramArguments` 第二項（`1 =>`）在 `~/.claude/skills/tw-realestate-etl/` 底下（skill 版排程）→ 跳過本節。
+3. 第二項在別處 → `<repo>` 是它往上兩層（`<repo>/scripts/run_etl.py`）。repo 版的資料夾與份數各自依序取第一個有設的：`<repo>/config.json` 的 `backup_dir`／`backup_keep_count` → plist `EnvironmentVariables` 的 `REALPRICE_BACKUP_DIR`／`REALPRICE_BACKUP_KEEP_COUNT` → `<repo>/.env` 的同名變數 → 程式預設（`<repo>/backups`、0）。相對路徑以 plist 的 `WorkingDirectory` 為準。
+4. 兩邊的資料夾都展開 `~` 再比（`python3 -c 'import os,sys;print(os.path.realpath(os.path.expanduser(sys.argv[1])))' <路徑>`）：字面不同也可能是同一個。
+5. 同一個資料夾、份數不同 → 告訴使用者會刪哪些檔，問要不要繼續。backup.py 依**檔名**排序（不是修改時間）：
+   ```bash
+   ls <backup_dir>/tw_realestate_*.sql.gz | sort -r
+   ```
+   清單裡今天的檔（`tw_realestate_<YYYYMMDD>`）已存在時，會刪第 `<backup_keep_count>`＋1 份起的；還不存在時備份會多一份，改成第 `<backup_keep_count>` 份起都刪。
+   不同意：`run` 改帶 `--skip-backup`（不備份、不刪），`backup` 不跑。要根治就讓兩邊份數一樣，由使用者決定改哪邊。
+
 ---
 
 ## 操作 0: help
@@ -204,6 +220,8 @@ psql -d <db_name> -f ~/.claude/skills/tw-realestate-etl/sql/schema.sql
 
 ### 執行 ETL
 
+先照〈共用設定〉〈備份保留份數比對〉；結果是要帶 `--skip-backup` 就加進 `<flags>`。
+
 ```bash
 REALPRICE_DB_HOST=<db_host> \
 REALPRICE_DB_PORT=<db_port> \
@@ -240,7 +258,7 @@ REALPRICE_TARGET_CITIES=<cities> \
 
 0. `date +%s`，記下輸出的數字當 `<T0>`（第 3 步要用；每次 Bash 呼叫的 shell 變數不會留到下一次）。
 1. `<data_dir>/<季>.zip` 存在 → 把它和 `<data_dir>/<季>/` 改名成 `<季>.old-<T0>.zip`／`<季>.old-<T0>/` 保留舊版（download.py 看到 zip 就不重抓；backfill 不讀 `.old-*/`）。名字帶 `<T0>`，上次更新留下的舊版不會被蓋掉或被 `mv` 搬進去。
-2. `run --start <季> --end <季>`。季檔已匯過時，upsert 會因 etl_log 已 success 而跳過，屬正常。
+2. `run --start <季> --end <季>`（含〈備份保留份數比對〉）。季檔已匯過時，upsert 會因 etl_log 已 success 而跳過，屬正常。
    exit 3 → 還原後停在這裡：第 2 步留下的 `<季>.zip`／`<季>/`（下載或解壓成功才會有）先改名成 `<季>.failed-<T0>.zip`／`<季>.failed-<T0>/`，再把 `.old-<T0>.zip`／`.old-<T0>/` 改回原名。看 log 回報原因：拿到 HTML 是季檔還沒公布（見上一段，等公布後再更新）；curl 失敗是網路問題，稍後從第 0 步重做；下載成功但每個檔都匯入失敗或目標縣市沒有資料，就附上 log 回報。有 `.failed-<T0>` 時一併告訴使用者路徑，要留著查原因或刪掉由使用者決定。
 3. 回補（只改 `project_name`、`building_unit`、`cancel_status` 三欄）：
    ```bash
@@ -491,10 +509,7 @@ REALPRICE_BACKUP_KEEP_COUNT=<backup_keep_count> \
 
 回報備份結果（檔案路徑、大小）。
 
-備份完會刪掉 `<backup_dir>` 裡較舊的 `tw_realestate_*.sql.gz`，只留最新 `<backup_keep_count>` 份（0＝全留），**不分是誰寫的**。
-repo 版排程（`~/TonyUtility/TW_RealEstate_ETL` 的 `.env`；沒設時程式預設 0＝全留）和 skill 的 config.json 若指向同一個 `backup_dir`、份數又不同，跑一次 skill 版 backup 就會把排程留下的舊檔輪到剩 `<backup_keep_count>` 份。
-跑之前比對：plist `EnvironmentVariables`、repo `.env` 的 `REALPRICE_BACKUP_DIR`／`REALPRICE_BACKUP_KEEP_COUNT` 和 config.json 的 `backup_dir`／`backup_keep_count`。同一個資料夾而份數不同 → 先告訴使用者會刪哪些檔（`ls -t <backup_dir>/tw_realestate_*.sql.gz` 第 `<backup_keep_count>`＋1 份以後），確認後再跑。
-（2026-11-22 Mac mini：repo `.env` 為 0、config.json 為 4，同一資料夾，skill 版 backup 刪了 4 份舊備份；TW_RealEstate_ETL Issue #10。）
+跑之前先照〈共用設定〉〈備份保留份數比對〉；使用者不同意刪那些檔就不跑。
 
 ---
 
