@@ -167,7 +167,7 @@ COLUMN_MAP_B = {
     **COLUMN_MAP_A,
     "建案名稱": "project_name",
     "棟及號": "building_unit",
-    "解約情形": "cancel_status",  # e.g. "1130116全部解約"; empty = not cancelled
+    "解約情形": "cancel_status",  # e.g. "1130116全部解約"; empty = not cancelled (112S3 on; older files lack the column)
 }
 
 # 租賃 (c) — rental CSVs use different Chinese headers from sales CSVs.

@@ -198,6 +198,7 @@ class TestColumnMapping:
         "total_price", "unit_price",
         "parking_type", "parking_area", "parking_price",
         "serial_no", "transfer_no", "note",
+        "project_name", "building_unit", "cancel_status",
         "source_file", "source_season", "city_code",
     }
 
@@ -218,6 +219,10 @@ class TestColumnMapping:
     def test_column_map_a_values(self):
         for en_col in config.COLUMN_MAP_A.values():
             assert en_col in self.KNOWN_TXN_COLS, f"Unknown column in COLUMN_MAP_A: {en_col}"
+
+    def test_column_map_b_values(self):
+        for en_col in config.COLUMN_MAP_B.values():
+            assert en_col in self.KNOWN_TXN_COLS, f"Unknown column in COLUMN_MAP_B: {en_col}"
 
     def test_column_map_c_values(self):
         for en_col in config.COLUMN_MAP_C.values():

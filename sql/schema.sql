@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     -- 預售屋 (Pre-sale only; NULL for 買賣 rows and b files before 107S1/112S3)
     project_name        TEXT,           -- 建案名稱
     building_unit       TEXT,           -- 棟及號
-    cancel_status       TEXT,           -- 解約情形 e.g. 1130116全部解約 (NULL = 未解約)
+    cancel_status       TEXT,           -- 解約情形 e.g. 1130116全部解約 (112S3 起；NULL = 未解約或該季無此欄)
 
     -- ETL metadata
     source_file         TEXT,           -- 來源檔名 e.g. d_lvr_land_a.csv

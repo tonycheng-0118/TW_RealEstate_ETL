@@ -176,6 +176,10 @@ def temp_db():
         cols_sql = ", ".join(f"{c} TEXT" for c in old_cols)
         cur.execute(f"CREATE TEMP TABLE transactions ({cols_sql}, updated_at TIMESTAMPTZ, "
                     f"CONSTRAINT tmp_uq UNIQUE (serial_no))")
+        # Guard: every unqualified 'transactions' in these tests must hit the TEMP table.
+        cur.execute("SELECT n.nspname LIKE 'pg_temp%' FROM pg_class c JOIN pg_namespace n "
+                    "ON n.oid = c.relnamespace WHERE c.oid = 'transactions'::regclass")
+        assert cur.fetchone()[0]
     yield conn
     conn.rollback()
     conn.close()
