@@ -446,7 +446,8 @@ def test_season_header_only_file_is_not_unmatched(temp_db, tmp_path, monkeypatch
 
 def test_find_b_files_same_season_in_two_dirs_newer_zip_goes_last(tmp_path):
     # Review R1-1 (PR #9): on the Mac mini the repo data/ and the skill data/ both hold
-    # 114S1–114S4; the 3/27 repo copy must not overwrite the 10/13 skill copy.
+    # 114S1–114S4; whichever zip is newer must be applied last, whatever the --data-dir order.
+    # Here repo's zip (300) is the newer one.
     repo, skill = tmp_path / "repo", tmp_path / "skill"
     for d, zip_mtime in ((repo, 300), (skill, 100)):
         _touch(d / "114S4" / "j_lvr_land_b.csv", 999)  # CSV mtime is re-extraction time: ignored
