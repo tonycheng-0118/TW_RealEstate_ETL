@@ -491,6 +491,11 @@ REALPRICE_BACKUP_KEEP_COUNT=<backup_keep_count> \
 
 回報備份結果（檔案路徑、大小）。
 
+備份完會刪掉 `<backup_dir>` 裡較舊的 `tw_realestate_*.sql.gz`，只留最新 `<backup_keep_count>` 份（0＝全留），**不分是誰寫的**。
+repo 版排程（`~/TonyUtility/TW_RealEstate_ETL` 的 `.env`；沒設時程式預設 0＝全留）和 skill 的 config.json 若指向同一個 `backup_dir`、份數又不同，跑一次 skill 版 backup 就會把排程留下的舊檔輪到剩 `<backup_keep_count>` 份。
+跑之前比對：plist `EnvironmentVariables`、repo `.env` 的 `REALPRICE_BACKUP_DIR`／`REALPRICE_BACKUP_KEEP_COUNT` 和 config.json 的 `backup_dir`／`backup_keep_count`。同一個資料夾而份數不同 → 先告訴使用者會刪哪些檔（`ls -t <backup_dir>/tw_realestate_*.sql.gz` 第 `<backup_keep_count>`＋1 份以後），確認後再跑。
+（2026-11-22 Mac mini：repo `.env` 為 0、config.json 為 4，同一資料夾，skill 版 backup 刪了 4 份舊備份；TW_RealEstate_ETL Issue #10。）
+
 ---
 
 ## 操作 6: schedule

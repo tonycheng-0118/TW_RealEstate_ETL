@@ -436,7 +436,7 @@ run_etl.py
 2. 輸出透過 gzip 壓縮為 `.sql.gz`
 3. 檔名格式: `tw_realestate_{YYYYMMDD}.sql.gz`
 4. 存放路徑: `config.BACKUP_DIR`（可設定為雲端同步資料夾）
-5. 清理舊備份：本地只保留最近 `config.BACKUP_KEEP_COUNT` 份（預設 4），舊的自動刪除
+5. 清理舊備份：本地只保留最近 `config.BACKUP_KEEP_COUNT` 份（程式預設 0＝全留；skill `init` 預設寫 4），舊的自動刪除；同一資料夾裡不分是 repo 排程或 skill 寫的
 6. 備份目錄可由使用者設定為雲端同步資料夾，`backup.py` 本身不處理上傳，只負責把檔案放到正確位置
 
 **重要設計**:
@@ -511,7 +511,7 @@ def _get(key: str, env_key: str, default):
 | DB password | `db_password` | `REALPRICE_DB_PASSWORD` | `""` | 本地端通常免密碼 |
 | 資料目錄 | `data_dir` | `REALPRICE_DATA_DIR` | `./data` | ZIP/CSV 暫存目錄 |
 | 備份目錄 | `backup_dir` | `REALPRICE_BACKUP_DIR` | `./backups` | 備份檔存放路徑 |
-| 備份保留數 | `backup_keep_count` | `REALPRICE_BACKUP_KEEP_COUNT` | `4` | 保留最近 N 份，0=全部保留 |
+| 備份保留數 | `backup_keep_count` | `REALPRICE_BACKUP_KEEP_COUNT` | `0`（skill `init` 預設寫 `4`） | 保留最近 N 份，0=全部保留；repo 排程與 skill 共用 `backup_dir` 時兩邊要設一樣 |
 | 目標縣市 | `target_cities` | `REALPRICE_TARGET_CITIES` | `["A"]` | 篩選縣市，`None`/`"all"`=全台 |
 | 下載間隔 | `download_delay` | `REALPRICE_DOWNLOAD_DELAY` | `10` | 下載間隔秒數 |
 | 批次大小 | `batch_size` | `REALPRICE_BATCH_SIZE` | `500` | Upsert 批次筆數 |
