@@ -220,6 +220,8 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
 
 排程只匯本期檔，匯入後才登記的解約不會回寫；季檔帶的是下載當時最新的解約情形。
 
+`<季>` 早於 112S3 的季檔沒有解約欄，這一段更新不到解約：要補建案照〈回補建案〉，不用重新下載。
+
 `<data_dir>` 一律是 config.json 的 `data_dir`（`run` 下載的地方）。
 
 0. `date +%s`，記下輸出的數字當 `<T0>`（第 3 步要用；每次 Bash 呼叫的 shell 變數不會留到下一次）。
@@ -230,8 +232,14 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
    ```bash
    python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code> --data-dir <data_dir> --season <季> --since <T0>
    ```
-   完成條件：**exit 0**（腳本自己驗 `<data_dir>/<季>.zip` 比 `<T0>` 新、目標季每個 b 檔都有預售欄位、有資料列的都對到列；`--season` 只讀 `<data_dir>/<季>/`）。解約欄 112S3 起才有；更早的季 exit 0 只代表建案欄已更新。
-   exit 4 → 看 log 的 `Season check failed` 行：no `<季>` b file 是 `--data-dir`／`--city` 給錯，或第 2 步沒解出檔；zip 太舊（第 1 步沒做）就從第 0 步重做；matched 0 就回頭查第 2 步有沒有匯入；no pre-sale columns 是 107S1 以前的季，沒有可更新的欄位。修不好就回報「未更新」並附上那一行。
+   完成條件：**exit 0**（`--season` 只讀 `<data_dir>/<季>/`）。之後告訴使用者 `<季>.old-<T0>.zip`／`<季>.old-<T0>/` 的路徑：要留著比對或刪掉由使用者決定。
+   exit 4 → 看 log 的 `Season check failed` 行，照原字串判讀：
+   - `no <季> b file`：`--data-dir`／`--city` 給錯，或第 2 步沒解出檔。
+   - `is missing or older than --since`：zip 不存在或還是舊的，通常是第 1 步沒做 → 從第 0 步重做。
+   - `matched 0 rows`：回頭查第 2 步有沒有匯入。
+   - `has no pre-sale columns`：107S1 以前的季，沒有可更新的欄位。
+
+   修不好就回報「未更新」並附上那一行。
    排程從 `current/` 匯入的列也會更新：比對靠 `serial_no`，不必讀排程的資料夾。
 
 ### 回補建案（`建案` 是 NULL）
@@ -241,10 +249,10 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
 1. config.json 的 `data_dir`。
 2. 有排程時，排程用的資料夾。讀 `~/Library/LaunchAgents/com.tw-realestate.etl.plist`（不存在就只用第 1 項）：
    - `ProgramArguments` 的 `run_etl.py` 在 `~/.claude/skills/tw-realestate-etl/` 底下 → 排程用的就是第 1 項，不必再加。
-   - 在別處（repo 版排程，例：Mac mini 的 `~/TonyUtility/TW_RealEstate_ETL/scripts/run_etl.py`）→ 依序取第一個有設的：該 repo 根目錄 `config.json` 的 `data_dir`；plist `EnvironmentVariables` 的 `REALPRICE_DATA_DIR`；repo `.env` 的 `REALPRICE_DATA_DIR`（相對路徑以 plist 的 `WorkingDirectory` 為準）；都沒有就是 `<repo>/data`。
+   - 在別處（repo 版排程，例：Mac mini 的 `~/TonyUtility/TW_RealEstate_ETL/scripts/run_etl.py`）→ 依序取第一個有設的：該 repo 根目錄 `config.json` 的 `data_dir`；plist `EnvironmentVariables` 的 `REALPRICE_DATA_DIR`；repo `.env` 的 `REALPRICE_DATA_DIR`；都沒有就是 `<repo>/data`。前三者是相對路徑時，以 plist 的 `WorkingDirectory` 為準。
 3. 其他手動跑過 `run_etl.py` 的 repo 的資料夾（判法同第 2 項的 `config.json`／`.env`／`<repo>/data`）；不確定有沒有就問使用者。
 
-同一季在多個資料夾都有時，腳本會依 `<季>.zip` 的 mtime 套用，最新下載的版本最後套用、留在 DB；`--data-dir` 的順序不影響結果。
+`--data-dir` 的順序不影響結果（同一季以最新下載的 zip 為準）。
 
 ```bash
 python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code> --data-dir <第 1 項> [--data-dir <第 2、3 項>…]
