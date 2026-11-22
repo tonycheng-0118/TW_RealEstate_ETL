@@ -164,7 +164,13 @@ python scripts/delete.py --start 113S2 --end 113S2 --city A
 # 預設讀 config.DATA_DIR；--data-dir 可重複，--dry-run 只讀檔不寫 DB
 python scripts/backfill_presale.py --city D,J,O
 python scripts/backfill_presale.py --city D,J,O --data-dir data --data-dir ~/.claude/skills/tw-realestate-etl/data
+
+# 重新下載某一季後只套那一季，並證明換到新檔：--since 填改名舊 zip 前的 `date +%s`
+# 目標季的 <季>.zip 比 --since 舊（還是舊下載）、或目標檔對到 0 列 → exit 4
+python scripts/backfill_presale.py --city D --data-dir data --season 115S3 --since 1763800000
 ```
+
+`--season` 看的是 `<季>.zip` 的 mtime，不是 CSV：`run_etl.py` 每次都會重新解壓，CSV 的 mtime 永遠是新的。
 
 ### 啟用排程（macOS LaunchAgent）
 

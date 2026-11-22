@@ -312,3 +312,119 @@ def test_etl_upsert_writes_new_columns(temp_db, tmp_path, monkeypatch):
 
     assert load.upsert_transactions(df, temp_db) == 2
     assert _row(temp_db, "RPPNMLSKKIIGFDJ58CB")[2:] == ("廣僑樹No.3", "B棟2號", "1130116全部解約")
+
+
+# ------------------------------------------------------------------
+# --season / --since: verify one season after re-downloading it (TW_RealEstate_ETL#8)
+# Expected behaviour comes from Issue #8: the check must fail when the target season
+# is still the old download. run_etl re-extracts the zip every run, so the CSV mtime
+# is always fresh; only the <season>.zip mtime tells an old download from a new one.
+# ------------------------------------------------------------------
+
+def test_find_b_files_season_only_reads_that_season_in_every_dir(tmp_path):
+    repo, skill = tmp_path / "repo", tmp_path / "skill"
+    for d in (repo, skill):
+        _touch(d / "115S3" / "j_lvr_land_b.csv", 100)
+        _touch(d / "115S3.old" / "j_lvr_land_b.csv", 100)
+        _touch(d / "115S2" / "j_lvr_land_b.csv", 100)
+        _touch(d / "current" / "j_lvr_land_b.csv", 100)
+    _touch(skill / "115S3" / "o_lvr_land_b.csv", 100)
+
+    assert backfill_presale.find_b_files([repo, skill], ["J"], season="115S3") == [
+        repo / "115S3" / "j_lvr_land_b.csv",
+        skill / "115S3" / "j_lvr_land_b.csv",
+    ]
+
+
+@pytest.mark.parametrize("zip_mtime, since, stale", [
+    (2000, 1000, False),  # re-downloaded after the procedure started
+    (1000, 1000, False),  # same second counts as fresh
+    (999, 1000, True),    # old download kept (step 1 skipped)
+    (None, 1000, True),   # no zip: nothing proves the CSV is a new download
+])
+def test_stale_files_judges_by_season_zip_mtime_not_csv(tmp_path, zip_mtime, since, stale):
+    csv = tmp_path / "115S3" / "j_lvr_land_b.csv"
+    _touch(csv, 5000)  # CSV always looks fresh: run_etl re-extracts every run
+    if zip_mtime is not None:
+        _touch(tmp_path / "115S3.zip", zip_mtime)
+
+    assert backfill_presale.stale_files([csv], since) == ([csv] if stale else [])
+
+
+def _season_argv(data_dir, *extra):
+    return ["backfill_presale.py", "--city", "J", "--data-dir", str(data_dir), *extra]
+
+
+def _no_db():
+    raise AssertionError("must fail before touching the database")
+
+
+@pytest.mark.parametrize("extra", [
+    ["--season", "115S3"],                       # --since is what makes the check fail on old files
+    ["--since", "1000"],                         # --since alone means nothing
+    ["--season", "115S5", "--since", "1000"],    # no fifth quarter
+    ["--season", "", "--since", "1000"],
+])
+def test_season_arguments_are_validated(tmp_path, monkeypatch, extra):
+    monkeypatch.setattr(backfill_presale, "get_connection", _no_db)
+    monkeypatch.setattr(sys, "argv", _season_argv(tmp_path, *extra))
+    with pytest.raises(SystemExit) as e:
+        backfill_presale.main()
+    assert e.value.code == 2
+
+
+def test_season_lowercase_s_is_accepted(tmp_path, monkeypatch, caplog):
+    _touch(tmp_path / "115S3" / "j_lvr_land_b.csv", 100)
+    _touch(tmp_path / "115S3.zip", 100)
+    monkeypatch.setattr(backfill_presale, "get_connection", _no_db)
+    monkeypatch.setattr(sys, "argv", _season_argv(tmp_path, "--season", "115s3", "--since", "100", "--dry-run"))
+    assert backfill_presale.main() == 0
+
+
+def test_season_with_old_zip_exits_4_before_db(tmp_path, monkeypatch, caplog):
+    _touch(tmp_path / "115S3" / "j_lvr_land_b.csv", 5000)
+    _touch(tmp_path / "115S3.zip", 100)
+    monkeypatch.setattr(backfill_presale, "get_connection", _no_db)
+    monkeypatch.setattr(sys, "argv", _season_argv(tmp_path, "--season", "115S3", "--since", "1000"))
+
+    assert backfill_presale.main() == 4
+    assert "115S3.zip" in caplog.text
+
+
+def test_season_with_no_files_exits_4(tmp_path, monkeypatch):
+    _touch(tmp_path / "115S2" / "j_lvr_land_b.csv", 5000)
+    monkeypatch.setattr(backfill_presale, "get_connection", _no_db)
+    monkeypatch.setattr(sys, "argv", _season_argv(tmp_path, "--season", "115S3", "--since", "1000"))
+    assert backfill_presale.main() == 4
+
+
+class _KeepOpen:
+    """Hand temp_db to main() without letting it close the connection the fixture owns."""
+
+    def __init__(self, conn):
+        self.conn = conn
+
+    def __getattr__(self, name):
+        return getattr(self.conn, name)
+
+    def close(self):
+        pass
+
+
+@pytest.mark.parametrize("serials, expected_exit", [
+    (["RPPNMLSKKIIGFDJ58CB"], 0),  # target season rows are in the DB → updated
+    ([], 4),                       # fresh file but nothing matched: not proof of an update
+])
+def test_season_exit_depends_on_target_file_matching(temp_db, tmp_path, monkeypatch, serials, expected_exit):
+    load.ensure_schema(temp_db)
+    with temp_db.cursor() as cur:
+        for s in serials:
+            cur.execute("INSERT INTO transactions (serial_no) VALUES (%s)", (s,))
+    _fixture_as(tmp_path / "115S3", "j_lvr_land_b_115.csv", "j_lvr_land_b.csv")
+    _touch(tmp_path / "115S3.zip", 2000)
+    monkeypatch.setattr(backfill_presale, "get_connection", lambda: _KeepOpen(temp_db))
+    monkeypatch.setattr(sys, "argv", _season_argv(tmp_path, "--season", "115S3", "--since", "1000"))
+
+    assert backfill_presale.main() == expected_exit
+    if serials:
+        assert _row(temp_db, "RPPNMLSKKIIGFDJ58CB")[4] == "1130116全部解約"
