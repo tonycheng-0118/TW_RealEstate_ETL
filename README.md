@@ -1,4 +1,3 @@
-
 # TW_RealEstate_ETL
 
 台灣內政部**實價登錄**開放資料自動化 ETL pipeline。
@@ -382,16 +381,17 @@ gunzip -c tw_realestate_20260327.sql.gz | psql -d tw_realestate
 
 ### pre-push hook（取代 GitHub Actions）
 
-本 repo 不用 CI，push 前由本機 hook 跑 ruff＋全套 pytest。每個 clone／worktree 設一次：
+本 repo 不用 CI，push 前由本機 hook 跑 ruff＋全套 pytest。每個 clone 設一次（同一 clone 的 worktree 共用 repo config）：
 
 ```bash
 git config core.hooksPath githooks
 ```
 
+- 本 hook 之前切出、沒有 `githooks/` 的分支 push 時找不到 hook，會直接放行：先 rebase 到 main。
 - hook 用該 worktree 的 `.venv/bin/python`；沒有或缺套件時會印出建置指令、擋下 push。
 - 工作區要乾淨（含 untracked），測的就是要推的 HEAD。不 push 只想驗：`sh githooks/pre-push --manual`，成功最後一行是 `pre-push: ✓ passed`。
 - 只測 `.venv` 那一版 Python（Mac mini 是 3.14，和 launchd 排程用的 main checkout `.venv` 同版）；以前 CI 跑的 3.12／3.13 不再測，要支援舊版時手動建該版 `.venv` 跑一次。
-- **不要求 PostgreSQL**：`tests/test_presale.py` 的 DB 測試在連不上時 skip（`-rs` 會列出 skip 原因）。Mac mini 有本機 DB 所以會跑到；在沒有 DB 的機器 push 前，看輸出有沒有 `PostgreSQL unreachable` 的 skip，有就代表這幾支沒測到。
+- **不要求 PostgreSQL**：`tests/test_presale.py` 的 DB 測試在連不上時 skip（`-rs` 會列出 skip 原因）。Mac mini 有本機 DB 所以會跑到；在沒有 DB 的機器 push 前，hook 在成功字串前會印 `pre-push: WARNING: … DB tests skipped`，代表這幾支沒測到。
 
 ## 已知限制
 

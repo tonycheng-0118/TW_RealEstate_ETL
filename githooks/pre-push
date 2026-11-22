@@ -54,9 +54,13 @@ echo "pre-push: ruff check" >&2
 
 echo "pre-push: pytest" >&2
 gate="$HOME/.claude/scripts/test_gate.py"
+# Output is teed to $log so a DB skip can be reported; the exit code goes through $log.rc
+# because POSIX sh has no pipefail.
+log=$(mktemp "${TMPDIR:-/tmp}/tw-etl-prepush.XXXXXX") || exit 1
+trap 'rm -f "$log" "$log.rc"' EXIT
 if [ -f "$gate" ]; then
-  python3 "$gate" run -- "$py" -m pytest -q -n auto -rs >&2
-  rc=$?
+  { python3 "$gate" run -- "$py" -m pytest -q -n auto -rs; echo $? > "$log.rc"; } 2>&1 | tee "$log" >&2
+  rc=$(cat "$log.rc")
   # 75 = gave up waiting for the lock: nothing ran, so do not report it as a test failure
   if [ "$rc" = 75 ]; then
     echo "pre-push: test_gate gave up waiting for its lock; pytest did not run. Push blocked." >&2
@@ -64,9 +68,14 @@ if [ -f "$gate" ]; then
   fi
 else
   echo "pre-push: $gate not found; running pytest directly." >&2
-  "$py" -m pytest -q -n auto -rs >&2
-  rc=$?
+  { "$py" -m pytest -q -n auto -rs; echo $? > "$log.rc"; } 2>&1 | tee "$log" >&2
+  rc=$(cat "$log.rc")
 fi
 [ "$rc" = 0 ] || { echo "pre-push: FAILED at pytest; push blocked." >&2; exit 1; }
+# Not a failure (README〈pre-push hook〉), but say so before the ok line that local_gate checks.
+# A test_gate cache hit prints no pytest output: the warning was shown on the run that passed.
+# -rs groups identical skips into one "SKIPPED [N] …" line, so sum the N.
+n=$(sed -n 's/^SKIPPED \[\([0-9]*\)\].*PostgreSQL unreachable.*/\1/p' "$log" | awk '{s += $1} END {print s + 0}')
+[ "$n" -gt 0 ] && echo "pre-push: WARNING: PostgreSQL unreachable, $n DB tests skipped (tests/test_presale.py)." >&2
 echo "pre-push: passed at $head" >&2
 echo "pre-push: ✓ passed" >&2
