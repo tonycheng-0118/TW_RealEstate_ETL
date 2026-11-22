@@ -7,7 +7,8 @@ and never touches other columns. Columns a file does not have (建案名稱/棟�
 before 107S1, 解約情形 before 112S3) are left as they are.
 
 Files run oldest season first, then current/ releases by mtime, so the newest
-file wins when the same serial_no appears more than once.
+file wins when the same serial_no appears more than once. A season present in
+several data dirs runs in <season>.zip mtime order (newest download last).
 
 CLI usage:
     python scripts/backfill_presale.py --city D,J,O
@@ -16,8 +17,8 @@ CLI usage:
     python scripts/backfill_presale.py --city D --season 115S3 --since 1763800000
 
 --season reads only <data_dir>/<season>/ and fails (exit 4) unless every target file
-comes from a <season>.zip modified at or after --since (epoch seconds) and matched at
-least one row. Use it after re-downloading a season to prove the new file was applied.
+comes from a <season>.zip modified at or after --since (epoch seconds), has the
+pre-sale columns, and (unless header-only) matched at least one row. Use it after re-downloading a season to prove the new file was applied.
 
 Exit codes: 0 ok, 1 error (files before the failing one stay committed), 2 bad arguments,
 4 --season check failed.
@@ -47,11 +48,22 @@ logger = logging.getLogger(__name__)
 SEASON_DIR = re.compile(r"^(\d{3})S([1-4])$")
 
 
+def _season_zip(path: Path) -> Path:
+    """<data_dir>/<season>.zip that path (<data_dir>/<season>/<file>) was extracted from."""
+    return path.parent.parent / f"{path.parent.name}.zip"
+
+
 def _order_key(path: Path) -> tuple:
-    """Seasons ascending, then current/ releases by file mtime."""
+    """Seasons ascending, then current/ releases by file mtime.
+
+    Within a season (same season in several data dirs) the newer <season>.zip goes
+    last; a missing zip counts as oldest. Not the CSV mtime: run_etl re-extracts the
+    zip every run.
+    """
     m = SEASON_DIR.match(path.parent.name)
     if m:
-        return (0, int(m.group(1)), int(m.group(2)), 0.0)
+        zip_path = _season_zip(path)
+        return (0, int(m.group(1)), int(m.group(2)), zip_path.stat().st_mtime if zip_path.is_file() else 0.0)
     return (1, 0, 0, path.stat().st_mtime)
 
 
@@ -92,7 +104,7 @@ def stale_files(files: list[Path], since: float) -> list[Path]:
     """
     stale = []
     for path in files:
-        zip_path = path.parent.parent / f"{path.parent.name}.zip"
+        zip_path = _season_zip(path)
         if not zip_path.is_file() or zip_path.stat().st_mtime < since:
             stale.append(path)
     return stale
@@ -198,7 +210,7 @@ def main() -> int:
         return 0
 
     conn = get_connection()
-    unmatched = []
+    failed = []
     try:
         ensure_schema(conn)
         if season is None:
@@ -208,8 +220,10 @@ def main() -> int:
             for path in files:  # one at a time so each target file's match count is known
                 one = backfill([path], conn)
                 stats = {k: stats[k] + one[k] for k in stats}
-                if one["rows_read"] and one["rows_updated"] == 0:  # header-only file: nothing to prove
-                    unmatched.append(path)
+                if one["files"] == 0:  # before 107S1: none of the three columns
+                    failed.append((path, "has no pre-sale columns (season before 107S1?)"))
+                elif one["rows_read"] and one["rows_updated"] == 0:  # header-only file: nothing to prove
+                    failed.append((path, "matched 0 rows (season not imported yet?)"))
     except Exception as e:
         logger.error("Backfill failed: %s", e, exc_info=True)
         conn.rollback()
@@ -218,9 +232,9 @@ def main() -> int:
         conn.close()
 
     logger.info("Done: %s", stats)
-    for path in unmatched:
-        logger.error("Season check failed: %s matched 0 rows (season not imported yet?)", path)
-    return 4 if unmatched else 0
+    for path, why in failed:
+        logger.error("Season check failed: %s %s", path, why)
+    return 4 if failed else 0
 
 
 if __name__ == "__main__":

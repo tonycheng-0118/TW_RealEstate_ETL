@@ -442,3 +442,33 @@ def test_season_header_only_file_is_not_unmatched(temp_db, tmp_path, monkeypatch
     monkeypatch.setattr(sys, "argv", _season_argv(tmp_path, "--season", "115S3", "--since", "1000"))
 
     assert backfill_presale.main() == 0
+
+
+def test_find_b_files_same_season_in_two_dirs_newer_zip_goes_last(tmp_path):
+    # Review R1-1 (PR #9): on the Mac mini the repo data/ and the skill data/ both hold
+    # 114S1–114S4; the 3/27 repo copy must not overwrite the 10/13 skill copy.
+    repo, skill = tmp_path / "repo", tmp_path / "skill"
+    for d, zip_mtime in ((repo, 300), (skill, 100)):
+        _touch(d / "114S4" / "j_lvr_land_b.csv", 999)  # CSV mtime is re-extraction time: ignored
+        _touch(d / "114S4.zip", zip_mtime)
+    _touch(skill / "114S3" / "j_lvr_land_b.csv", 999)  # no zip: oldest within its season
+
+    for dirs in ([repo, skill], [skill, repo]):
+        assert backfill_presale.find_b_files(dirs, ["J"]) == [
+            skill / "114S3" / "j_lvr_land_b.csv",
+            skill / "114S4" / "j_lvr_land_b.csv",
+            repo / "114S4" / "j_lvr_land_b.csv",
+        ]
+
+
+def test_season_without_presale_columns_exits_4(temp_db, tmp_path, monkeypatch):
+    # Review R1-5 (PR #9): seasons before 107S1 have none of the three columns, so
+    # --season cannot have updated anything.
+    load.ensure_schema(temp_db)
+    _fixture_as(tmp_path / "105S1", "d_lvr_land_b_105.csv", "d_lvr_land_b.csv")
+    _touch(tmp_path / "105S1.zip", 2000)
+    monkeypatch.setattr(backfill_presale, "get_connection", lambda: _KeepOpen(temp_db))
+    monkeypatch.setattr(sys, "argv", ["backfill_presale.py", "--city", "D", "--data-dir", str(tmp_path),
+                                      "--season", "105S1", "--since", "1000"])
+
+    assert backfill_presale.main() == 4
