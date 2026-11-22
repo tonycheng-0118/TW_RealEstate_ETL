@@ -166,7 +166,7 @@ python scripts/backfill_presale.py --city D,J,O
 python scripts/backfill_presale.py --city D,J,O --data-dir data --data-dir ~/.claude/skills/tw-realestate-etl/data
 
 # 重新下載某一季後只套那一季，並證明換到新檔：--since 填改名舊 zip 前的 `date +%s`
-# 目標季的 <季>.zip 比 --since 舊（還是舊下載）、或目標檔對到 0 列 → exit 4
+# exit 4：找不到目標季的檔、<季>.zip 比 --since 舊（還是舊下載）、沒有預售欄位（107S1 以前）、或有資料列卻對到 0 列（只有表頭的檔不算）
 python scripts/backfill_presale.py --city D --data-dir data --season 115S3 --since 1763800000
 ```
 

@@ -230,8 +230,8 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
    ```bash
    python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code> --data-dir <data_dir> --season <季> --since <T0>
    ```
-   完成條件：**exit 0**（腳本自己驗 `<data_dir>/<季>.zip` 比 `<T0>` 新、目標季每個 b 檔都有預售欄位並對到列；`--season` 只讀 `<data_dir>/<季>/`）。解約欄 112S3 起才有；更早的季 exit 0 只代表建案欄已更新。
-   exit 4 → 看 log 的 `Season check failed` 行：zip 太舊（第 1 步沒做）就從第 0 步重做；matched 0 就回頭查第 2 步有沒有匯入；no pre-sale columns 是 107S1 以前的季，沒有可更新的欄位。修不好就回報「未更新」並附上那一行。
+   完成條件：**exit 0**（腳本自己驗 `<data_dir>/<季>.zip` 比 `<T0>` 新、目標季每個 b 檔都有預售欄位、有資料列的都對到列；`--season` 只讀 `<data_dir>/<季>/`）。解約欄 112S3 起才有；更早的季 exit 0 只代表建案欄已更新。
+   exit 4 → 看 log 的 `Season check failed` 行：no `<季>` b file 是 `--data-dir`／`--city` 給錯，或第 2 步沒解出檔；zip 太舊（第 1 步沒做）就從第 0 步重做；matched 0 就回頭查第 2 步有沒有匯入；no pre-sale columns 是 107S1 以前的季，沒有可更新的欄位。修不好就回報「未更新」並附上那一行。
    排程從 `current/` 匯入的列也會更新：比對靠 `serial_no`，不必讀排程的資料夾。
 
 ### 回補建案（`建案` 是 NULL）
