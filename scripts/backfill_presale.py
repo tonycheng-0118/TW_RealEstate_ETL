@@ -21,7 +21,7 @@ comes from a <season>.zip modified at or after --since (epoch seconds), has the
 pre-sale columns, and (unless header-only) matched at least one row. Use it after re-downloading a season to prove the new file was applied.
 
 Exit codes: 0 ok, 1 error (files before the failing one stay committed), 2 bad arguments,
-4 --season check failed.
+4 no b file found, or --season check failed.
 """
 
 import argparse
@@ -194,10 +194,13 @@ def main() -> int:
 
     files = find_b_files(data_dirs, cities, season)
     logger.info("Found %d b file(s) for cities %s in %s", len(files), cities or "ALL", data_dirs)
-    if season is not None:
-        if not files:
+    if not files:  # a wrong --data-dir must not pass as a finished backfill
+        if season is not None:
             logger.error("Season check failed: no %s b file for cities %s", season, cities or "ALL")
-            return 4
+        else:
+            logger.error("No b file found for cities %s in %s", cities or "ALL", data_dirs)
+        return 4
+    if season is not None:
         stale = stale_files(files, args.since)
         for path in stale:
             logger.error("Season check failed: %s.zip is missing or older than --since; "

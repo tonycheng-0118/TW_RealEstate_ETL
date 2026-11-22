@@ -473,3 +473,13 @@ def test_season_without_presale_columns_exits_4(temp_db, tmp_path, monkeypatch):
                                       "--season", "105S1", "--since", "1000"])
 
     assert backfill_presale.main() == 4
+
+
+@pytest.mark.parametrize("extra", [[], ["--dry-run"]])
+def test_no_b_files_at_all_exits_4(tmp_path, monkeypatch, extra):
+    # Review PR tonycheng-0118/TonyClaude#149 R1-1: a wrong --data-dir finds 0 files; exit 0
+    # would let the agent report the backfill as done while 建案 stays NULL.
+    monkeypatch.setattr(backfill_presale, "get_connection", _no_db)
+    monkeypatch.setattr(sys, "argv", ["backfill_presale.py", "--city", "J",
+                                      "--data-dir", str(tmp_path / "nope"), *extra])
+    assert backfill_presale.main() == 4

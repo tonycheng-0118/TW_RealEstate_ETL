@@ -161,7 +161,7 @@ python scripts/delete.py --start 113S2 --end 113S2 --city A
 用本機已下載的 b 檔補上（不下載、只 UPDATE 這三欄、不新增列；只讀季別資料夾如 `114S1/` 與 `current/`，其他資料夾如 `114S1.old/` 略過；同一筆在多個檔出現時以最新季、最新 current 為準；同一季在多個 `--data-dir` 都有時，以 `<季>.zip` 較新的為準）：
 
 ```bash
-# 預設讀 config.DATA_DIR；--data-dir 可重複，--dry-run 只讀檔不寫 DB
+# 預設讀 config.DATA_DIR；--data-dir 可重複，--dry-run 只讀檔不寫 DB；一個 b 檔都沒找到 → exit 4
 python scripts/backfill_presale.py --city D,J,O
 python scripts/backfill_presale.py --city D,J,O --data-dir data --data-dir ~/.claude/skills/tw-realestate-etl/data
 

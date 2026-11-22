@@ -227,7 +227,7 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
 0. `date +%s`，記下輸出的數字當 `<T0>`（第 3 步要用；每次 Bash 呼叫的 shell 變數不會留到下一次）。
 1. `<data_dir>/<季>.zip` 存在 → 把它和 `<data_dir>/<季>/` 改名成 `<季>.old-<T0>.zip`／`<季>.old-<T0>/` 保留舊版（download.py 看到 zip 就不重抓；backfill 不讀 `.old-*/`）。名字帶 `<T0>`，上次更新留下的舊版不會被蓋掉或被 `mv` 搬進去。
 2. `run --start <季> --end <季>`。季檔已匯過時，upsert 會因 etl_log 已 success 而跳過，屬正常。
-   exit 3 → 還原後停在這裡：第 2 步留下的 `<季>.zip`／`<季>/`（下載或解壓成功才會有）先改名成 `<季>.failed-<T0>.zip`／`<季>.failed-<T0>/`，再把 `.old-<T0>.zip`／`.old-<T0>/` 改回原名。看 log 回報原因：拿到 HTML 是季檔還沒公布（見上一段，等公布後再更新）；curl 失敗是網路問題，稍後從第 0 步重做；下載成功但每個檔都匯入失敗或目標縣市沒有資料，就附上 log 回報。
+   exit 3 → 還原後停在這裡：第 2 步留下的 `<季>.zip`／`<季>/`（下載或解壓成功才會有）先改名成 `<季>.failed-<T0>.zip`／`<季>.failed-<T0>/`，再把 `.old-<T0>.zip`／`.old-<T0>/` 改回原名。看 log 回報原因：拿到 HTML 是季檔還沒公布（見上一段，等公布後再更新）；curl 失敗是網路問題，稍後從第 0 步重做；下載成功但每個檔都匯入失敗或目標縣市沒有資料，就附上 log 回報。有 `.failed-<T0>` 時一併告訴使用者路徑，要留著查原因或刪掉由使用者決定。
 3. 回補（只改 `project_name`、`building_unit`、`cancel_status` 三欄）：
    ```bash
    python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code> --data-dir <data_dir> --season <季> --since <T0>
@@ -255,10 +255,12 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
 `--data-dir` 的順序不影響結果（同一季以最新下載的 zip 為準）。
 
 ```bash
-python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code> --data-dir <第 1 項> [--data-dir <第 2、3 項>…]
+python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city all --data-dir <第 1 項> [--data-dir <第 2、3 項>…]
 ```
 
-完成條件：exit 0。這段補的是缺的欄位；要拿到最新的解約情形，照上一段〈更新解約情形〉。
+`--city all`：排程和 config 的縣市可能不同（例：Mac mini 排程跑 D,J,O、config 只有 D），backfill 只 UPDATE 已存在的列，帶 all 不會多寫資料。
+
+完成條件：exit 0。exit 4 且 log 有 `No b file found` → 資料夾給錯或這台沒下載過，回頭查上面的清單。這段補的是缺的欄位；要拿到最新的解約情形，照上一段〈更新解約情形〉。
 
 ---
 
