@@ -483,3 +483,17 @@ def test_no_b_files_at_all_exits_4(tmp_path, monkeypatch, extra):
     monkeypatch.setattr(sys, "argv", ["backfill_presale.py", "--city", "J",
                                       "--data-dir", str(tmp_path / "nope"), *extra])
     assert backfill_presale.main() == 4
+
+
+def test_unreadable_b_file_error_names_the_file(tmp_path):
+    # Review PR #9 R4-1: some unimported cities' old season files do not parse (e.g. 110S4
+    # f_/b_lvr_land_b.csv: "EOF inside string"); the error must say which file, so the
+    # agent can drop that city from --city and report it.
+    lines = (FIXTURES / "j_lvr_land_b_115.csv").read_bytes().splitlines(keepends=True)
+    bad = tmp_path / "110S4" / "f_lvr_land_b.csv"
+    bad.parent.mkdir()
+    bad.write_bytes(b"".join(lines[:3]) + b'"unterminated,quote\n')
+
+    with pytest.raises(Exception) as e:
+        backfill_presale.backfill([bad], None, dry_run=True)
+    assert str(bad) in str(e.value)

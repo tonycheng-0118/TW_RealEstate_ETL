@@ -146,7 +146,10 @@ def backfill(files: list[Path], conn, dry_run: bool = False) -> dict:
 
     stats = {"files": 0, "rows_read": 0, "rows_updated": 0}
     for path in files:
-        cols, rows = read_updates(path)
+        try:
+            cols, rows = read_updates(path)
+        except Exception as e:  # pandas parse errors do not name the file
+            raise RuntimeError(f"cannot read {path}: {e}") from e
         if not cols:
             logger.info("%s: no pre-sale columns, skipped", path)
             continue

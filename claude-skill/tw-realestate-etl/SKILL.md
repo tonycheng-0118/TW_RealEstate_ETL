@@ -255,12 +255,12 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
 `--data-dir` 的順序不影響結果（同一季以最新下載的 zip 為準）。
 
 ```bash
-python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city all --data-dir <第 1 項> [--data-dir <第 2、3 項>…]
+python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <縣市清單> --data-dir <第 1 項> [--data-dir <第 2、3 項>…]
 ```
 
-`--city all`：排程和 config 的縣市可能不同（例：Mac mini 排程跑 D,J,O、config 只有 D），backfill 只 UPDATE 已存在的列，帶 all 不會多寫資料。
+`<縣市清單>`：config.json 的 `target_cities`，加上 plist `ProgramArguments` 裡 `--city` 後面的縣市，取聯集、逗號分隔（例：Mac mini 的 config 只有 `D`、排程跑 `D,J,O` → `D,J,O`）。不要帶 `all`：有些沒匯入過的縣市的舊季檔讀不進來（例：110S4 的 `f_`／`b_lvr_land_b.csv`），會在那裡 exit 1，排在後面的季和 `current/` 都補不到。
 
-完成條件：exit 0。exit 4 且 log 有 `No b file found` → 資料夾給錯或這台沒下載過，回頭查上面的清單。這段補的是缺的欄位；要拿到最新的解約情形，照上一段〈更新解約情形〉。
+完成條件：exit 0。exit 1 → log 的 `Backfill failed: cannot read <檔>` 是讀不進來的檔，把那個縣市從清單拿掉再跑，並回報那個檔。exit 4 且 log 有 `No b file found` → 資料夾給錯或這台沒下載過，回頭查上面的清單。這段補的是缺的欄位；要拿到最新的解約情形，照上一段〈更新解約情形〉。
 
 ---
 
