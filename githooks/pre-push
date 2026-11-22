@@ -1,0 +1,72 @@
+#!/bin/sh
+# Local regression gate: ruff + the full pytest suite before every push (replaces GitHub Actions,
+# TW_RealEstate_ETL#10; ~/.claude/rules/testing.md). Enable once per clone:
+#   git config core.hooksPath githooks
+#
+# Interpreter: <worktree>/.venv/bin/python, built from requirements-dev.txt (command printed when missing).
+# One Python version only (the .venv's; the launchd job runs the main checkout's .venv). CI ran 3.12 and 3.13.
+# DB tests (tests/test_presale.py temp_db) need PostgreSQL at the REALPRICE_DB_* settings; when it is
+# unreachable they are skipped, not failed, and `-rs` lists them in the output.
+#
+# Tests run on the working tree, so it must be exactly what is being pushed: a dirty tree, or pushing a
+# commit other than HEAD, is refused instead of stashed (the stash stack is shared by every worktree).
+# Commits the remote already has (a new branch cut from origin/main) are not tested again.
+#
+# Manual mode: `sh githooks/pre-push --manual` from the worktree root tests HEAD without a push; it is the
+# local_gate `run` in TonyClaude agents/repos.json. Last line on success: `pre-push: ✓ passed` (local_gate `ok`).
+zero=0000000000000000000000000000000000000000
+head=$(git rev-parse HEAD)
+run=0
+[ "$1" = "--manual" ] && run=1
+[ "$run" = 1 ] || while read -r local_ref local_sha remote_ref remote_sha; do
+  # Branch deletion (git push --delete): nothing is being uploaded.
+  [ "$local_sha" = "$zero" ] && continue
+  [ -z "$(git rev-list -n 1 "$local_sha" --not --remotes)" ] && continue
+  sha=$(git rev-parse "$local_sha^{commit}" 2>/dev/null)
+  if [ "$sha" != "$head" ]; then
+    echo "pre-push: $local_ref is not HEAD; check it out and push from there so the tests see it." >&2
+    exit 1
+  fi
+  run=1
+done
+[ "$run" = 1 ] || exit 0
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+if [ -n "$(git status --porcelain)" ]; then
+  echo "pre-push: working tree has uncommitted or untracked files; commit or remove them first:" >&2
+  git status --short >&2
+  exit 1
+fi
+
+py=.venv/bin/python
+if ! "$py" -c 'import pandas, psycopg2, pytest, xdist, ruff' 2>/dev/null; then
+  echo "pre-push: $py missing or lacks requirements-dev.txt; build it in this worktree, then push again:" >&2
+  echo "  python3.14 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt" >&2
+  echo "  (Python 3.12-3.14: requirements.txt has no pandas wheel for 3.15 yet)" >&2
+  exit 1
+fi
+
+# git exports GIT_DIR and friends to hooks; keep the tests' environment the same as a plain shell run.
+for v in $(env | sed -n 's/^\(GIT_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$v"; done
+
+echo "pre-push: ruff check" >&2
+"$py" -m ruff check . >&2 || { echo "pre-push: FAILED at ruff check; push blocked." >&2; exit 1; }
+
+echo "pre-push: pytest" >&2
+gate="$HOME/.claude/scripts/test_gate.py"
+if [ -f "$gate" ]; then
+  python3 "$gate" run -- "$py" -m pytest -q -n auto -rs >&2
+  rc=$?
+  # 75 = gave up waiting for the lock: nothing ran, so do not report it as a test failure
+  if [ "$rc" = 75 ]; then
+    echo "pre-push: test_gate gave up waiting for its lock; pytest did not run. Push blocked." >&2
+    exit 1
+  fi
+else
+  echo "pre-push: $gate not found; running pytest directly." >&2
+  "$py" -m pytest -q -n auto -rs >&2
+  rc=$?
+fi
+[ "$rc" = 0 ] || { echo "pre-push: FAILED at pytest; push blocked." >&2; exit 1; }
+echo "pre-push: passed at $head" >&2
+echo "pre-push: ✓ passed" >&2

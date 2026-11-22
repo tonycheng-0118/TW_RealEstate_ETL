@@ -1,4 +1,3 @@
-![CI](https://github.com/tonycheng-0118/TW_RealEstate_ETL/actions/workflows/ci.yml/badge.svg)
 
 # TW_RealEstate_ETL
 
@@ -58,7 +57,7 @@ ZIP 內含各縣市 CSV，檔名格式：`{縣市代碼小寫}_lvr_land_{類型}
 ### 前置需求
 
 - macOS（已於 Mac mini M4 驗證）
-- Python 3.12+
+- Python 3.12–3.14（3.15 起 `requirements.txt` 的 pandas 沒有預先編好的 wheel，`pip install` 會失敗）
 - PostgreSQL 17（`brew install postgresql@17`）
 - `curl`（macOS 內建；下載用）
 - Node.js（MCP server 需要 `npx`）
@@ -299,7 +298,7 @@ cp .env.template .env
 
 ## Claude Code Skill 安裝
 
-本專案提供自包含的 Claude Code Skill，安裝後即可在 Claude Code 中完成所有操作（初始化、ETL、查詢、備份、排程），**不需要 git clone、pip install、npm**。
+本專案提供自包含的 Claude Code Skill，安裝後即可在 Claude Code 中完成所有操作（初始化、ETL、查詢、備份、排程），**不需要 git clone、npm**；`init` 會在 skill 目錄建 `.venv` 裝 Python 套件，之後所有指令都用 config.json 的 `python_path`（那個 `.venv` 的 python）。
 
 ### 方法一：從 Release 安裝（推薦）
 
@@ -314,7 +313,7 @@ unzip tw-realestate-etl.zip -d ~/.claude/skills/
 ```
 
 > **注意**：請下載 Assets 中的 `tw-realestate-etl.zip`，而非 GitHub 自動產生的 Source code 壓縮檔。
-> Source code 包含整個 repo（tests、CI 設定等），不適合直接當 skill 使用。
+> Source code 包含整個 repo（tests、hook 設定等），不適合直接當 skill 使用。
 
 ### 方法二：從 repo 打包安裝
 
@@ -371,9 +370,23 @@ gunzip -c tw_realestate_20260327.sql.gz | psql -d tw_realestate
 ## 測試
 
 ```bash
-source .venv/bin/activate
-python -m pytest tests/ -v
+.venv/bin/pip install -r requirements-dev.txt   # pytest、pytest-xdist、ruff
+.venv/bin/python -m ruff check .
+.venv/bin/python -m pytest -q -n auto -rs
 ```
+
+### pre-push hook（取代 GitHub Actions）
+
+本 repo 不用 CI，push 前由本機 hook 跑 ruff＋全套 pytest。每個 clone／worktree 設一次：
+
+```bash
+git config core.hooksPath githooks
+```
+
+- hook 用該 worktree 的 `.venv/bin/python`；沒有或缺套件時會印出建置指令、擋下 push。
+- 工作區要乾淨（含 untracked），測的就是要推的 HEAD。不 push 只想驗：`sh githooks/pre-push --manual`，成功最後一行是 `pre-push: ✓ passed`。
+- 只測 `.venv` 那一版 Python（Mac mini 是 3.14，和 launchd 排程用的 main checkout `.venv` 同版）；以前 CI 跑的 3.12／3.13 不再測，要支援舊版時手動建該版 `.venv` 跑一次。
+- **不要求 PostgreSQL**：`tests/test_presale.py` 的 DB 測試在連不上時 skip（`-rs` 會列出 skip 原因）。Mac mini 有本機 DB 所以會跑到；在沒有 DB 的機器 push 前，看輸出有沒有 `PostgreSQL unreachable` 的 skip，有就代表這幾支沒測到。
 
 ## 已知限制
 
