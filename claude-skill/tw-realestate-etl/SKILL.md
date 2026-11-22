@@ -57,6 +57,30 @@ CONFIG_FILE=$SKILL_ROOT/config.json
    REALPRICE_TARGET_CITIES=<target_cities joined by comma> \
    ```
 
+4. run、backup、schedule install 先確認 `<python_path>` 裝好了套件：
+   ```bash
+   <python_path> -c 'import pandas, psycopg2, dotenv'
+   ```
+   exit 非 0（含 config.json 沒有 `python_path`）→ 照〈操作 1: init〉Step 2 建 `.venv`，把 `python_path` 改成 `~/.claude/skills/tw-realestate-etl/.venv/bin/python`，重跑上面的指令，exit 0 才往下。
+   Bash 指令裡的 `<python_path>` 照 config.json 原字串（`~` 開頭可直接當指令；plist 例外，見〈schedule install〉第 2 步）。系統 python3 多半沒裝 pandas。
+
+### 備份保留份數比對（run、backup 前）
+
+backup.py（`run` 也會呼叫，exit 3 與未預期錯誤除外，見〈操作 2: run〉exit code 表）備份完會刪掉 `<backup_dir>` 裡較舊的 `tw_realestate_*.sql.gz`，只留最新 `<backup_keep_count>` 份（0＝全留），不分是誰寫的。repo 版排程和 skill 寫同一個資料夾、份數又不同時，跑一次就會把排程留下的舊檔輪掉（Issue #10）。
+
+1. `<backup_keep_count>` 是 0 → 跳過本節。
+2. 找 repo 版排程：讀 `~/Library/LaunchAgents/com.tw-realestate.etl.plist`（`plutil -p`）。不存在，或 `ProgramArguments` 第二項（`1 =>`，plist 裡是絕對路徑）在 `~/.claude/skills/tw-realestate-etl/` 展開後的路徑底下（skill 版排程）→ 跳過本節。
+3. 第二項在別處 → `<repo>` 是它往上兩層（`<repo>/scripts/run_etl.py`）。repo 版的資料夾與份數各自依序取第一個有設的：`<repo>/config.json` 的 `backup_dir`／`backup_keep_count` → plist `EnvironmentVariables` 的 `REALPRICE_BACKUP_DIR`／`REALPRICE_BACKUP_KEEP_COUNT` → `<repo>/.env` 的同名變數 → 程式預設（`<repo>/backups`、0）。相對路徑以 plist 的 `WorkingDirectory` 為準。
+4. skill 的 `<backup_dir>` 和第 3 步的 repo 資料夾都展開成絕對路徑再比（`python3 -c 'import os,sys;print(os.path.realpath(os.path.expanduser(sys.argv[1])))' <路徑>`）：字面不同也可能是同一個。不同資料夾，或份數相同 → 跳過本節。
+5. 列出現有備份（新到舊）。backup.py 依**檔名**排序（不是修改時間）：
+   ```bash
+   ls "<backup_dir 展開後的絕對路徑>"/tw_realestate_*.sql.gz | sort -r
+   ```
+6. 算會刪的檔：從清單頂端往下數，今天的檔（`tw_realestate_<YYYYMMDD>`）已在清單裡時，第 `<backup_keep_count>`＋1 份起都會刪；不在時備份會多一份，第 `<backup_keep_count>` 份起都會刪。沒有要刪的 → 跳過本節。
+7. 把會刪的檔名列給使用者，問要不要繼續，等他回覆。回覆時附上根治法：兩邊份數設成一樣，改 repo `.env` 還是 config.json 由使用者決定（不要自己改）。
+
+本節的結果只有三種：照常跑；不同意時 `run` 在 `<flags>` 加 `--skip-backup`（不備份、不刪）；不同意時 `backup` 不跑。
+
 ---
 
 ## 操作 0: help
@@ -112,16 +136,23 @@ CONFIG_FILE=$SKILL_ROOT/config.json
 which python3 && which psql && which pg_dump && which curl
 ```
 
-- `python3` 不存在 → 提示安裝（`brew install python` 或從 python.org）
+- `python3` 不存在 → 提示安裝（`brew install python@3.14` 或從 python.org）
 - `psql` / `pg_dump` 不存在 → 提示 `brew install postgresql@17`
 - `curl` 不存在 → 提示 `brew install curl`（`download.py` 用它下載）
 - 全部存在 → 繼續
 
 ### Step 2: 安裝 Python 依賴
 
-```bash
-pip3 install pandas psycopg2-binary python-dotenv
-```
+套件裝在 skill 自己的 `.venv`（Homebrew 的 Python 擋 `pip install`，PEP 668）：
+
+1. `python3 --version`：3.12–3.14 就用 `python3` 當 `<py>`；其他版本一律改用 `python3.14`（沒有就 `brew install python@3.14`）。`requirements.txt` 釘的 pandas==3.0.1 要 3.11 以上，也沒有 3.15 的 wheel，`pip install` 會失敗。
+2. 已有 `~/.claude/skills/tw-realestate-etl/.venv` 且它的 `bin/python --version` 不是 3.12–3.14 → 先 `rm -rf` 它。
+3. 建 venv、裝套件：
+   ```bash
+   <py> -m venv ~/.claude/skills/tw-realestate-etl/.venv && ~/.claude/skills/tw-realestate-etl/.venv/bin/pip install -r ~/.claude/skills/tw-realestate-etl/scripts/requirements.txt
+   ```
+
+完成條件：`~/.claude/skills/tw-realestate-etl/.venv/bin/python -c 'import pandas, psycopg2, dotenv'` exit 0。
 
 ### Step 3: 互動問答
 
@@ -151,7 +182,7 @@ pip3 install pandas psycopg2-binary python-dotenv
   "backup_dir": "~/.claude/skills/tw-realestate-etl/backups",
   "backup_keep_count": 4,
   "data_dir": "~/.claude/skills/tw-realestate-etl/data",
-  "python_path": "<which python3 的結果>",
+  "python_path": "~/.claude/skills/tw-realestate-etl/.venv/bin/python",
   "initialized_at": "<當前 ISO 時間>"
 }
 ```
@@ -190,6 +221,8 @@ psql -d <db_name> -f ~/.claude/skills/tw-realestate-etl/sql/schema.sql
 
 ### 執行 ETL
 
+先照〈共用設定〉〈備份保留份數比對〉。
+
 ```bash
 REALPRICE_DB_HOST=<db_host> \
 REALPRICE_DB_PORT=<db_port> \
@@ -200,7 +233,7 @@ REALPRICE_BACKUP_DIR=<backup_dir> \
 REALPRICE_BACKUP_KEEP_COUNT=<backup_keep_count> \
 REALPRICE_DATA_DIR=<data_dir> \
 REALPRICE_TARGET_CITIES=<cities> \
-python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
+<python_path> ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
 ```
 
 ### 回報結果
@@ -224,13 +257,15 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
 
 `<data_dir>` 一律是 config.json 的 `data_dir`（`run` 下載的地方）。
 
+先照〈共用設定〉〈備份保留份數比對〉，結果記下來給第 2 步用（在第 1 步改檔名之前問，使用者不回也不會卡在還原到一半）。
+
 0. `date +%s`，記下輸出的數字當 `<T0>`（第 3 步要用；每次 Bash 呼叫的 shell 變數不會留到下一次）。
 1. `<data_dir>/<季>.zip` 存在 → 把它和 `<data_dir>/<季>/` 改名成 `<季>.old-<T0>.zip`／`<季>.old-<T0>/` 保留舊版（download.py 看到 zip 就不重抓；backfill 不讀 `.old-*/`）。名字帶 `<T0>`，上次更新留下的舊版不會被蓋掉或被 `mv` 搬進去。
-2. `run --start <季> --end <季>`。季檔已匯過時，upsert 會因 etl_log 已 success 而跳過，屬正常。
+2. 照〈執行 ETL〉跑，`<flags>` 是 `--start <季> --end <季>`（〈備份保留份數比對〉已在第 0 步前做過，結果照用）。季檔已匯過時，upsert 會因 etl_log 已 success 而跳過，屬正常。
    exit 3 → 還原後停在這裡：第 2 步留下的 `<季>.zip`／`<季>/`（下載或解壓成功才會有）先改名成 `<季>.failed-<T0>.zip`／`<季>.failed-<T0>/`，再把 `.old-<T0>.zip`／`.old-<T0>/` 改回原名。看 log 回報原因：拿到 HTML 是季檔還沒公布（見上一段，等公布後再更新）；curl 失敗是網路問題，稍後從第 0 步重做；下載成功但每個檔都匯入失敗或目標縣市沒有資料，就附上 log 回報。有 `.failed-<T0>` 時一併告訴使用者路徑，要留著查原因或刪掉由使用者決定。
 3. 回補（只改 `project_name`、`building_unit`、`cancel_status` 三欄）：
    ```bash
-   python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code> --data-dir <data_dir> --season <季> --since <T0>
+   <python_path> ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code> --data-dir <data_dir> --season <季> --since <T0>
    ```
    完成條件：**exit 0**（`--season` 只讀 `<data_dir>/<季>/`）。之後告訴使用者 `<季>.old-<T0>.zip`／`<季>.old-<T0>/` 的路徑：要留著比對或刪掉由使用者決定。
    exit 4 → 看 log 的 `Season check failed` 行，照原字串判讀：
@@ -255,7 +290,7 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
 `--data-dir` 的順序不影響結果（同一季以最新下載的 zip 為準）。
 
 ```bash
-python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <縣市清單> --data-dir <第 1 項> [--data-dir <第 2、3 項>…]
+<python_path> ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <縣市清單> --data-dir <第 1 項> [--data-dir <第 2、3 項>…]
 ```
 
 `<縣市清單>`：config.json 的 `target_cities`，加上 plist `ProgramArguments` 裡 `--city` 後面的縣市，取聯集、逗號分隔（例：Mac mini 的 config 只有 `D`、排程跑 `D,J,O` → `D,J,O`）。不要帶 `all`：有些沒匯入過的縣市的舊季檔讀不進來（例：110S4 的 `f_`／`b_lvr_land_b.csv`），會在那裡 exit 1，排在後面的季和 `current/` 都補不到。
@@ -464,6 +499,8 @@ ls -lh <backup_dir>/tw_realestate_*.sql.gz 2>/dev/null | head -5
 
 ### 執行備份
 
+先照〈共用設定〉〈備份保留份數比對〉。
+
 ```bash
 REALPRICE_DB_HOST=<db_host> \
 REALPRICE_DB_PORT=<db_port> \
@@ -472,10 +509,10 @@ REALPRICE_DB_USER=<db_user> \
 REALPRICE_DB_PASSWORD=<db_password> \
 REALPRICE_BACKUP_DIR=<backup_dir> \
 REALPRICE_BACKUP_KEEP_COUNT=<backup_keep_count> \
-python3 ~/.claude/skills/tw-realestate-etl/scripts/backup.py
+<python_path> ~/.claude/skills/tw-realestate-etl/scripts/backup.py
 ```
 
-回報備份結果（檔案路徑、大小）。
+完成條件：exit 0。回報備份檔路徑、大小，以及 log 裡每一行 `Deleting old backup:`（沒有就寫「沒刪舊檔」）。
 
 ---
 
@@ -485,32 +522,30 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/backup.py
 
 ### schedule install
 
-1. 讀取 config.json 取得 `python_path`（沒有則用 `which python3` 的結果）
-
-2. 讀取 plist 模板：
+1. 讀取 plist 模板：
    ```bash
    cat ~/.claude/skills/tw-realestate-etl/launchd/com.tw-realestate.etl.plist
    ```
 
-3. 用 Write 工具產生新的 plist，替換模板中的路徑：
+2. 用 Write 工具產生新的 plist，替換模板中的路徑（以下路徑都展開為絕對路徑：launchd 不展開 `~`）：
    - `/path/to/TW_RealEstate_ETL/.venv/bin/python` → `<python_path>`
-   - `/path/to/TW_RealEstate_ETL/scripts/run_etl.py` → `~/.claude/skills/tw-realestate-etl/scripts/run_etl.py`（展開為絕對路徑）
-   - `/path/to/TW_RealEstate_ETL` (WorkingDirectory) → `~/.claude/skills/tw-realestate-etl`（展開為絕對路徑）
-   - `/path/to/TW_RealEstate_ETL/logs/` → `~/.claude/skills/tw-realestate-etl/logs/`（展開為絕對路徑）
+   - `/path/to/TW_RealEstate_ETL/scripts/run_etl.py` → `~/.claude/skills/tw-realestate-etl/scripts/run_etl.py`
+   - `/path/to/TW_RealEstate_ETL` (WorkingDirectory) → `~/.claude/skills/tw-realestate-etl`
+   - `/path/to/TW_RealEstate_ETL/logs/` → `~/.claude/skills/tw-realestate-etl/logs/`
    - 加入 `<key>EnvironmentVariables</key>` 區段，嵌入所有 `REALPRICE_*` 環境變數
    - 使用者指定 city 時，`ProgramArguments` 末尾加 `<string>--city</string><string><city></string>`；沒指定就靠 `REALPRICE_TARGET_CITIES`
 
-4. 寫入：
+3. 寫入：
    ```bash
    # Write 工具寫到 ~/Library/LaunchAgents/com.tw-realestate.etl.plist
    ```
 
-5. 載入：
+4. 載入：
    ```bash
    launchctl load ~/Library/LaunchAgents/com.tw-realestate.etl.plist
    ```
 
-6. 回報安裝成功，顯示排程時間（每月 2、12、22 日 03:00）。
+5. 回報安裝成功，顯示排程時間（每月 2、12、22 日 03:00）。
 
 ### schedule uninstall
 
@@ -529,6 +564,8 @@ ls -la ~/Library/LaunchAgents/com.tw-realestate.etl.plist 2>/dev/null
 ```
 
 回報排程狀態（已安裝/未安裝、上次執行狀態）。`launchctl list` 第二欄是上次的 exit code，對照〈操作 2: run〉的 exit code 表。
+
+`plutil -p` 看 plist 的 `ProgramArguments`：第二項（`1 =>`）是 `~/.claude/skills/tw-realestate-etl/` 底下的 `run_etl.py`（skill 版排程），且第一項（`0 =>`，python）不是 `<python_path>` 展開後的路徑 → 舊版 init 裝的，排程會因缺 pandas 失敗：照〈schedule install〉重裝。第二項在別處的是 repo 版排程，不歸 skill 管。
 
 ---
 

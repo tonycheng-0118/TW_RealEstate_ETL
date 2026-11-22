@@ -1,5 +1,3 @@
-![CI](https://github.com/tonycheng-0118/TW_RealEstate_ETL/actions/workflows/ci.yml/badge.svg)
-
 # TW_RealEstate_ETL
 
 台灣內政部**實價登錄**開放資料自動化 ETL pipeline。
@@ -58,7 +56,7 @@ ZIP 內含各縣市 CSV，檔名格式：`{縣市代碼小寫}_lvr_land_{類型}
 ### 前置需求
 
 - macOS（已於 Mac mini M4 驗證）
-- Python 3.12+
+- Python 3.12–3.14（3.15 起 `requirements.txt` 的 pandas 沒有預先編好的 wheel，`pip install` 會失敗）
 - PostgreSQL 17（`brew install postgresql@17`）
 - `curl`（macOS 內建；下載用）
 - Node.js（MCP server 需要 `npx`）
@@ -69,7 +67,7 @@ ZIP 內含各縣市 CSV，檔名格式：`{縣市代碼小寫}_lvr_land_{類型}
 # 1. Clone & 建立虛擬環境
 git clone https://github.com/<your-username>/TW_RealEstate_ETL.git
 cd TW_RealEstate_ETL
-python3 -m venv .venv
+python3.14 -m venv .venv   # 3.12–3.14 皆可
 source .venv/bin/activate
 pip install -r requirements.txt
 
@@ -193,6 +191,10 @@ launchctl list | grep tw-realestate
 TW_RealEstate_ETL/
 ├── config.py                 # 全域設定（DB、URL、欄位對照、路徑）
 ├── requirements.txt          # Python 依賴
+├── requirements-dev.txt      # 測試與 lint 工具（pytest、pytest-xdist、ruff）
+├── ruff.toml                 # ruff 規則（pre-push hook 用）
+├── githooks/
+│   └── pre-push              # 本機 regression：ruff＋全套 pytest（取代 CI）
 ├── .env.template             # 環境變數範本（複製為 .env 後填入本機設定）
 ├── spec.md                   # 開發規格書（完整設計文件）
 ├── .mcp.json                 # Claude Code MCP PostgreSQL 設定
@@ -217,6 +219,7 @@ TW_RealEstate_ETL/
 │   ├── test_transform.py     # 單元測試
 │   ├── test_run_etl.py       # exit code、備份、下載、etl_log 過濾
 │   ├── test_presale.py       # 預售屋三欄：transform、schema 遷移、回補（DB 測試用 TEMP 表，連不上就 skip）
+│   ├── test_backup.py        # backup.py 命令列：--help／未知參數不備份
 │   └── fixtures/             # 測試用的真實回應樣本
 ├── logs/                     # 執行日誌（gitignore）
 └── data/                     # 下載的 ZIP/CSV（gitignore）
@@ -299,7 +302,7 @@ cp .env.template .env
 
 ## Claude Code Skill 安裝
 
-本專案提供自包含的 Claude Code Skill，安裝後即可在 Claude Code 中完成所有操作（初始化、ETL、查詢、備份、排程），**不需要 git clone、pip install、npm**。
+本專案提供自包含的 Claude Code Skill，安裝後即可在 Claude Code 中完成所有操作（初始化、ETL、查詢、備份、排程），**不需要 git clone、npm**；`init` 會在 skill 目錄建 `.venv` 裝 Python 套件，之後所有指令都用 config.json 的 `python_path`（那個 `.venv` 的 python）。
 
 ### 方法一：從 Release 安裝（推薦）
 
@@ -314,7 +317,7 @@ unzip tw-realestate-etl.zip -d ~/.claude/skills/
 ```
 
 > **注意**：請下載 Assets 中的 `tw-realestate-etl.zip`，而非 GitHub 自動產生的 Source code 壓縮檔。
-> Source code 包含整個 repo（tests、CI 設定等），不適合直接當 skill 使用。
+> Source code 包含整個 repo（tests、hook 設定等），不適合直接當 skill 使用。
 
 ### 方法二：從 repo 打包安裝
 
@@ -371,9 +374,25 @@ gunzip -c tw_realestate_20260327.sql.gz | psql -d tw_realestate
 ## 測試
 
 ```bash
-source .venv/bin/activate
-python -m pytest tests/ -v
+.venv/bin/pip install -r requirements-dev.txt   # pytest、pytest-xdist、ruff
+.venv/bin/python -m ruff check .
+.venv/bin/python -m pytest -q -n auto -rs
 ```
+
+### pre-push hook（取代 GitHub Actions）
+
+本 repo 不用 CI，push 前由本機 hook 跑 ruff＋全套 pytest。每個 clone 設一次（同一 clone 的 worktree 共用 repo config）：
+
+```bash
+git config core.hooksPath githooks
+```
+
+- 本 hook 之前切出、沒有 `githooks/` 的分支 push 時找不到 hook，會直接放行：先 rebase 到 main。
+- hook 用該 worktree 的 `.venv/bin/python`；沒有或缺套件時會印出建置指令、擋下 push。
+- 工作區要乾淨（含 untracked），測的就是要推的 HEAD。不 push 只想驗：`sh githooks/pre-push --manual`，成功最後一行是 `pre-push: ✓ passed`。
+- `git push` 先連上 GitHub 才跑 hook；hook 排 test_gate 的隊太久時 SSH 會被斷，hook 印完 `✓ passed` 後 push 仍以 exit 141 失敗、遠端沒更新。建議先跑 `sh githooks/pre-push --manual`（通過會記進 test_gate 快取），再 `git push`，hook 命中快取幾秒就結束；push 完用 `git ls-remote origin <分支>` 確認。
+- 只測 `.venv` 那一版 Python（Mac mini 是 3.14，和 launchd 排程用的 main checkout `.venv` 同版）；以前 CI 跑的 3.12／3.13 不再測，要支援舊版時手動建該版 `.venv` 跑一次。
+- **不要求 PostgreSQL**：`tests/test_presale.py` 的 DB 測試在連不上時 skip（`-rs` 會列出 skip 原因）。Mac mini 有本機 DB 所以會跑到；在沒有 DB 的機器 push 前，hook 在成功字串前直接探一次 DB 連線，連不上就印 `pre-push: WARNING: PostgreSQL unreachable; …`，代表這幾支沒測到（test_gate 快取命中時也會探）。
 
 ## 已知限制
 

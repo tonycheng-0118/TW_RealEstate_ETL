@@ -12,6 +12,7 @@ Public API:
     backup_database() → Path (path to the created backup file)
 """
 
+import argparse
 import gzip
 import logging
 import shutil
@@ -127,11 +128,21 @@ def cleanup_old_backups() -> None:
         f.unlink()
 
 
-if __name__ == "__main__":
-    # Allow standalone execution: `python scripts/backup.py`
+def main(argv=None) -> int:
+    """CLI entry. Takes no options; parsing argv keeps `--help` from running a real backup."""
+    argparse.ArgumentParser(
+        description="Back up the DB with pg_dump into the backup dir, then delete all but the "
+        "newest BACKUP_KEEP_COUNT backups. Settings come from config.py (skill: config.json "
+        "first, then REALPRICE_* env vars).",
+    ).parse_args(argv)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
     path = backup_database()
     print(f"Backup saved to: {path}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

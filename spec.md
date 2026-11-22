@@ -5,7 +5,7 @@
 ### 目標
 建立自動化 pipeline，定期下載內政部實價登錄開放資料（Open Data），清洗後匯入本地 PostgreSQL，並透過 Claude Code Skill 以自然語言查詢不動產成交行情。
 
-**Skill 發布目標**：將 TW_RealEstate_ETL 打包為自包含的 Claude Code Skill，使用者只需複製一個資料夾到 `~/.claude/skills/`，即可在 Claude Code 中完成所有操作（初始化、ETL、查詢、備份、排程管理）。不需要 git clone、不需要 pip install、不需要 npm。
+**Skill 發布目標**：將 TW_RealEstate_ETL 打包為自包含的 Claude Code Skill，使用者只需複製一個資料夾到 `~/.claude/skills/`，即可在 Claude Code 中完成所有操作（初始化、ETL、查詢、備份、排程管理）。不需要 git clone、不需要 npm；Python 套件由 `init` 裝進 skill 自己的 `.venv`。
 
 ### 使用情境
 - 查詢特定地址/地號附近的歷史成交價格
@@ -31,7 +31,7 @@ claude
 ```
 
 ### 技術棧
-- **語言**: Python 3.12+
+- **語言**: Python 3.12–3.14（pandas==3.0.1 沒有 3.15 wheel）
 - **資料庫**: PostgreSQL 17（透過 Homebrew 安裝）
 - **排程**: macOS LaunchAgent
 - **AI 查詢**: Claude Code Skill + MCP PostgreSQL Server（可選）
@@ -436,7 +436,7 @@ run_etl.py
 2. 輸出透過 gzip 壓縮為 `.sql.gz`
 3. 檔名格式: `tw_realestate_{YYYYMMDD}.sql.gz`
 4. 存放路徑: `config.BACKUP_DIR`（可設定為雲端同步資料夾）
-5. 清理舊備份：本地只保留最近 `config.BACKUP_KEEP_COUNT` 份（預設 4），舊的自動刪除
+5. 清理舊備份：本地只保留最近 `config.BACKUP_KEEP_COUNT` 份（程式預設 0＝全留；skill `init` 預設寫 4），舊的自動刪除；同一資料夾裡不分是 repo 排程或 skill 寫的
 6. 備份目錄可由使用者設定為雲端同步資料夾，`backup.py` 本身不處理上傳，只負責把檔案放到正確位置
 
 **重要設計**:
@@ -490,14 +490,14 @@ def _get(key: str, env_key: str, default):
   "backup_dir": "~/.claude/skills/tw-realestate-etl/backups",
   "backup_keep_count": 4,
   "data_dir": "~/.claude/skills/tw-realestate-etl/data",
-  "python_path": "/usr/bin/python3",
+  "python_path": "~/.claude/skills/tw-realestate-etl/.venv/bin/python",
   "initialized_at": "2026-03-28T15:30:00"
 }
 ```
 
 **特性**:
 - 路徑欄位支援 `~`（scripts 內展開為絕對路徑）
-- `python_path` 在 init 時自動偵測（`which python3`）
+- `python_path` 固定指向 init 建的 skill `.venv`（config.json 跨機器同步，各機器各自建 `.venv`）
 - 如果 config.json 不存在，SKILL.md 指示 Claude Code 引導使用者執行 init
 
 ### 設定項一覽
@@ -511,7 +511,7 @@ def _get(key: str, env_key: str, default):
 | DB password | `db_password` | `REALPRICE_DB_PASSWORD` | `""` | 本地端通常免密碼 |
 | 資料目錄 | `data_dir` | `REALPRICE_DATA_DIR` | `./data` | ZIP/CSV 暫存目錄 |
 | 備份目錄 | `backup_dir` | `REALPRICE_BACKUP_DIR` | `./backups` | 備份檔存放路徑 |
-| 備份保留數 | `backup_keep_count` | `REALPRICE_BACKUP_KEEP_COUNT` | `4` | 保留最近 N 份，0=全部保留 |
+| 備份保留數 | `backup_keep_count` | `REALPRICE_BACKUP_KEEP_COUNT` | `0`（skill `init` 預設寫 `4`） | 保留最近 N 份，0=全部保留；repo 排程與 skill 共用 `backup_dir` 時兩邊要設一樣 |
 | 目標縣市 | `target_cities` | `REALPRICE_TARGET_CITIES` | `["A"]` | 篩選縣市，`None`/`"all"`=全台 |
 | 下載間隔 | `download_delay` | `REALPRICE_DOWNLOAD_DELAY` | `10` | 下載間隔秒數 |
 | 批次大小 | `batch_size` | `REALPRICE_BATCH_SIZE` | `500` | Upsert 批次筆數 |
@@ -542,7 +542,8 @@ Step 1: 檢查前置需求
   └─ which pg_dump     → 同上
 
 Step 2: 安裝 Python 依賴
-  pip install pandas psycopg2-binary requests python-dotenv
+  python3.14 -m venv ~/.claude/skills/tw-realestate-etl/.venv（3.12–3.14）
+  .venv/bin/pip install -r scripts/requirements.txt
 
 Step 3: 互動問答（Claude Code 直接對話）
   ├─ 選擇預設縣市（顯示代碼表）

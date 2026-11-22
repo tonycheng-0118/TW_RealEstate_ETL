@@ -1,0 +1,5 @@
+# Test and lint tools for the pre-push hook (githooks/pre-push). Runtime deps stay in requirements.txt.
+-r requirements.txt
+pytest==9.0.2
+pytest-xdist==3.8.0
+ruff==0.17.6

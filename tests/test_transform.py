@@ -8,7 +8,6 @@ import sys
 from datetime import date
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
 # Ensure project root is on the path.

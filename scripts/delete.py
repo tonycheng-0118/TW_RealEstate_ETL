@@ -23,8 +23,6 @@ _project_root = _script_dir.parent
 sys.path.insert(0, str(_project_root))
 sys.path.insert(0, str(_script_dir))
 
-import config  # noqa: E402
-
 try:
     from scripts.load import get_connection
     from scripts.season_utils import resolve_params, season_range
