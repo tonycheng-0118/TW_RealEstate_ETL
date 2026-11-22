@@ -216,6 +216,16 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
 
 尚未公布的季下載會拿到 HTML 而失敗：和其他季一起跑是 exit 1，只跑這一季是 exit 3（不備份）。
 
+### 更新解約情形（已公布的季）
+
+排程只匯本期檔，匯入後才登記的解約不會回寫；季檔帶的是下載當時最新的解約情形。
+
+1. `<data_dir>/<季>.zip` 存在 → 把它和 `<data_dir>/<季>/` 改名成 `<季>.old.zip`／`<季>.old/` 保留舊版（download.py 看到 zip 就不重抓；backfill 不讀 `.old/`）。
+2. `run --start <季> --end <季>`。季檔已匯過時，upsert 會因 etl_log 已 success 而跳過，屬正常。
+3. `python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code>`：只 UPDATE `project_name`、`building_unit`、`cancel_status`。完成條件：exit 0，且最後一行 `Done:` 的 `rows_updated` > 0。
+
+`<季>` 還沒公布季檔時第 2 步會失敗（見上一段），等公布後再更新。
+
 ---
 
 ## 操作 3: query
@@ -320,9 +330,9 @@ ORDER BY transaction_date_ad DESC;
 
 #### SQL 範例 — 預售屋依建案名稱分組
 
-**預設排除已解約**（`AND cancel_status IS NULL`）；使用者要看解約就拿掉這一行。時間範圍早於 112S3 時，回覆要註明那段期間沒有解約紀錄。
-解約是事後才登記的：排程只匯本期檔，匯入後才解約的列 `cancel_status` 仍是 NULL，所以**近一兩季的 NULL 不保證未解約**，回覆要註明。要更新：該季季檔還沒匯過就 `run --start <季> --end <季>`（季檔帶最新解約情形）；已匯過的季：本機那份季檔是當初下載的舊版，要先把 `<data_dir>/<季>.zip` 與 `<data_dir>/<季>/` 改名（如加 `.old`，不要刪）讓 `run --start <季> --end <季>` 重新下載解壓（upsert 會因 etl_log 已成功而跳過，屬正常），再跑 `python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code>` 只更新這三欄。
-`建案` 是 NULL 的那一組，是 107S1 以前、或 DB 升級前匯入還沒回補的列；出現時提示使用者跑 `python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code>` 補。
+**預設排除已解約**（`AND cancel_status IS NULL`）；使用者要看解約就拿掉這一行。
+`cancel_status` 是 NULL 不保證未解約：解約是事後登記的，排程匯入後才解約的列仍是 NULL，越接近下載時點的季越不準。回覆要註明：112S3 以前沒有解約紀錄；近期的 NULL 可能是事後才解約、還沒更新（更新方式見〈操作 2: run〉〈更新解約情形〉）。
+`建案` 是 NULL 的那一組，是 107S1 以前、或 DB 升級前匯入還沒回補的列；出現時提示使用者跑〈更新解約情形〉第 3 步的 backfill 指令補。
 
 ```sql
 SELECT

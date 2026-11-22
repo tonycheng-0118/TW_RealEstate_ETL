@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 
 -- Migration for tables created before the pre-sale columns existed
--- (load.ensure_schema() runs the same statements at the start of every ETL run).
+-- (load.ensure_schema() adds any missing ones at the start of every ETL run).
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS project_name TEXT;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS building_unit TEXT;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS cancel_status TEXT;

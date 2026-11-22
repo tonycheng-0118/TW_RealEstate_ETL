@@ -157,7 +157,7 @@ python scripts/delete.py --start 113S2 --end 113S2 --city A
 
 ### 回補預售屋建案名稱
 
-既有 DB 升級後（每次 `run_etl.py` 開頭會自動 `ALTER TABLE … ADD COLUMN IF NOT EXISTS`），舊的預售屋列沒有 `project_name`／`building_unit`／`cancel_status`。
+既有 DB 升級後（`run_etl.py` 開頭會檢查，缺欄才自動 `ALTER TABLE … ADD COLUMN`），舊的預售屋列沒有 `project_name`／`building_unit`／`cancel_status`。
 用本機已下載的 b 檔補上（不下載、只 UPDATE 這三欄、不新增列；只讀季別資料夾如 `114S1/` 與 `current/`，其他資料夾如 `114S1.old/` 略過；同一筆在多個檔出現時以最新季、最新 current 為準）：
 
 ```bash
@@ -240,7 +240,7 @@ TW_RealEstate_ETL/
 | | `parking_area` | NUMERIC | 車位面積（m²） |
 | 預售屋 | `project_name` | TEXT | 建案名稱（b 檔 107S1 起才有，其餘 NULL） |
 | | `building_unit` | TEXT | 棟及號（同上） |
-| | `cancel_status` | TEXT | 解約情形，如 `1130116全部解約`（b 檔 112S3 起；NULL＝未解約） |
+| | `cancel_status` | TEXT | 解約情形，如 `1130116全部解約`（b 檔 112S3 起；NULL＝匯入時未解約，匯入後才登記的解約不會回寫） |
 | 唯一鍵 | `serial_no` | TEXT | 編號，用於 upsert 去重 |
 
 ### rentals（租賃）
