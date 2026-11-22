@@ -5,7 +5,7 @@
 ### 目標
 建立自動化 pipeline，定期下載內政部實價登錄開放資料（Open Data），清洗後匯入本地 PostgreSQL，並透過 Claude Code Skill 以自然語言查詢不動產成交行情。
 
-**Skill 發布目標**：將 TW_RealEstate_ETL 打包為自包含的 Claude Code Skill，使用者只需複製一個資料夾到 `~/.claude/skills/`，即可在 Claude Code 中完成所有操作（初始化、ETL、查詢、備份、排程管理）。不需要 git clone、不需要 pip install、不需要 npm。
+**Skill 發布目標**：將 TW_RealEstate_ETL 打包為自包含的 Claude Code Skill，使用者只需複製一個資料夾到 `~/.claude/skills/`，即可在 Claude Code 中完成所有操作（初始化、ETL、查詢、備份、排程管理）。不需要 git clone、不需要 npm；Python 套件由 `init` 裝進 skill 自己的 `.venv`。
 
 ### 使用情境
 - 查詢特定地址/地號附近的歷史成交價格
@@ -490,14 +490,14 @@ def _get(key: str, env_key: str, default):
   "backup_dir": "~/.claude/skills/tw-realestate-etl/backups",
   "backup_keep_count": 4,
   "data_dir": "~/.claude/skills/tw-realestate-etl/data",
-  "python_path": "/usr/bin/python3",
+  "python_path": "~/.claude/skills/tw-realestate-etl/.venv/bin/python",
   "initialized_at": "2026-03-28T15:30:00"
 }
 ```
 
 **特性**:
 - 路徑欄位支援 `~`（scripts 內展開為絕對路徑）
-- `python_path` 在 init 時自動偵測（`which python3`）
+- `python_path` 固定指向 init 建的 skill `.venv`（config.json 跨機器同步，各機器各自建 `.venv`）
 - 如果 config.json 不存在，SKILL.md 指示 Claude Code 引導使用者執行 init
 
 ### 設定項一覽
@@ -542,7 +542,8 @@ Step 1: 檢查前置需求
   └─ which pg_dump     → 同上
 
 Step 2: 安裝 Python 依賴
-  pip install pandas psycopg2-binary requests python-dotenv
+  python3.14 -m venv ~/.claude/skills/tw-realestate-etl/.venv（3.12–3.14）
+  .venv/bin/pip install -r scripts/requirements.txt
 
 Step 3: 互動問答（Claude Code 直接對話）
   ├─ 選擇預設縣市（顯示代碼表）

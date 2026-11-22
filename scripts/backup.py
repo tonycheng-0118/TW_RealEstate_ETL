@@ -131,8 +131,9 @@ def cleanup_old_backups() -> None:
 def main(argv=None) -> int:
     """CLI entry. Takes no options; parsing argv keeps `--help` from running a real backup."""
     argparse.ArgumentParser(
-        description="Back up the DB with pg_dump into BACKUP_DIR (REALPRICE_* env vars), "
-        "then delete all but the newest BACKUP_KEEP_COUNT backups.",
+        description="Back up the DB with pg_dump into the backup dir, then delete all but the "
+        "newest BACKUP_KEEP_COUNT backups. Settings come from config.py (skill: config.json "
+        "first, then REALPRICE_* env vars).",
     ).parse_args(argv)
     logging.basicConfig(
         level=logging.INFO,

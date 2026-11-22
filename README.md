@@ -68,7 +68,7 @@ ZIP 內含各縣市 CSV，檔名格式：`{縣市代碼小寫}_lvr_land_{類型}
 # 1. Clone & 建立虛擬環境
 git clone https://github.com/<your-username>/TW_RealEstate_ETL.git
 cd TW_RealEstate_ETL
-python3 -m venv .venv
+python3.14 -m venv .venv   # 3.12–3.14 皆可
 source .venv/bin/activate
 pip install -r requirements.txt
 
@@ -192,6 +192,10 @@ launchctl list | grep tw-realestate
 TW_RealEstate_ETL/
 ├── config.py                 # 全域設定（DB、URL、欄位對照、路徑）
 ├── requirements.txt          # Python 依賴
+├── requirements-dev.txt      # 測試與 lint 工具（pytest、pytest-xdist、ruff）
+├── ruff.toml                 # ruff 規則（pre-push hook 用）
+├── githooks/
+│   └── pre-push              # 本機 regression：ruff＋全套 pytest（取代 CI）
 ├── .env.template             # 環境變數範本（複製為 .env 後填入本機設定）
 ├── spec.md                   # 開發規格書（完整設計文件）
 ├── .mcp.json                 # Claude Code MCP PostgreSQL 設定
@@ -216,6 +220,7 @@ TW_RealEstate_ETL/
 │   ├── test_transform.py     # 單元測試
 │   ├── test_run_etl.py       # exit code、備份、下載、etl_log 過濾
 │   ├── test_presale.py       # 預售屋三欄：transform、schema 遷移、回補（DB 測試用 TEMP 表，連不上就 skip）
+│   ├── test_backup.py        # backup.py 命令列：--help／未知參數不備份
 │   └── fixtures/             # 測試用的真實回應樣本
 ├── logs/                     # 執行日誌（gitignore）
 └── data/                     # 下載的 ZIP/CSV（gitignore）

@@ -128,8 +128,8 @@ which python3 && which psql && which pg_dump && which curl
 
 套件裝在 skill 自己的 `.venv`（Homebrew 的 Python 擋 `pip install`，PEP 668）：
 
-1. `python3 --version`：3.12–3.14 就用 `python3` 當 `<py>`；3.15 以上改用 `python3.14`（沒有就 `brew install python@3.14`）。`requirements.txt` 釘的 pandas==3.0.1 沒有 3.15 的 wheel，`pip install` 會失敗。
-2. 已有 `~/.claude/skills/tw-realestate-etl/.venv` 且它的 `bin/python --version` 是 3.15 以上 → 先 `rm -rf` 它。
+1. `python3 --version`：3.12–3.14 就用 `python3` 當 `<py>`；其他版本一律改用 `python3.14`（沒有就 `brew install python@3.14`）。`requirements.txt` 釘的 pandas==3.0.1 要 3.11 以上，也沒有 3.15 的 wheel，`pip install` 會失敗。
+2. 已有 `~/.claude/skills/tw-realestate-etl/.venv` 且它的 `bin/python --version` 不是 3.12–3.14 → 先 `rm -rf` 它。
 3. 建 venv、裝套件：
    ```bash
    <py> -m venv ~/.claude/skills/tw-realestate-etl/.venv && ~/.claude/skills/tw-realestate-etl/.venv/bin/pip install -r ~/.claude/skills/tw-realestate-etl/scripts/requirements.txt
