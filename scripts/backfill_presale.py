@@ -7,14 +7,21 @@ and never touches other columns. Columns a file does not have (建案名稱/棟�
 before 107S1, 解約情形 before 112S3) are left as they are.
 
 Files run oldest season first, then current/ releases by mtime, so the newest
-file wins when the same serial_no appears more than once.
+file wins when the same serial_no appears more than once. A season present in
+several data dirs runs in <season>.zip mtime order (newest download last).
 
 CLI usage:
     python scripts/backfill_presale.py --city D,J,O
     python scripts/backfill_presale.py --city D,J,O --data-dir data --data-dir ~/.claude/skills/tw-realestate-etl/data
     python scripts/backfill_presale.py --city all --dry-run
+    python scripts/backfill_presale.py --city D --season 115S3 --since 1763800000
 
-Exit codes: 0 ok, 1 error (files before the failing one stay committed), 2 bad arguments.
+--season reads only <data_dir>/<season>/ and fails (exit 4) unless every target file
+comes from a <season>.zip modified at or after --since (epoch seconds), has the
+pre-sale columns, and (unless header-only) matched at least one row. Use it after re-downloading a season to prove the new file was applied.
+
+Exit codes: 0 ok, 1 error (files before the failing one stay committed), 2 bad arguments,
+4 no b file found, or --season check failed.
 """
 
 import argparse
@@ -41,19 +48,31 @@ logger = logging.getLogger(__name__)
 SEASON_DIR = re.compile(r"^(\d{3})S([1-4])$")
 
 
+def _season_zip(path: Path) -> Path:
+    """<data_dir>/<season>.zip that path (<data_dir>/<season>/<file>) was extracted from."""
+    return path.parent.parent / f"{path.parent.name}.zip"
+
+
 def _order_key(path: Path) -> tuple:
-    """Seasons ascending, then current/ releases by file mtime."""
+    """Seasons ascending, then current/ releases by file mtime.
+
+    Within a season (same season in several data dirs) the newer <season>.zip goes
+    last; a missing zip counts as oldest. Not the CSV mtime: run_etl re-extracts the
+    zip every run.
+    """
     m = SEASON_DIR.match(path.parent.name)
     if m:
-        return (0, int(m.group(1)), int(m.group(2)), 0.0)
+        zip_path = _season_zip(path)
+        return (0, int(m.group(1)), int(m.group(2)), zip_path.stat().st_mtime if zip_path.is_file() else 0.0)
     return (1, 0, 0, path.stat().st_mtime)
 
 
-def find_b_files(data_dirs: list[Path], cities) -> list[Path]:
+def find_b_files(data_dirs: list[Path], cities, season: str | None = None) -> list[Path]:
     """List <city>_lvr_land_b.csv in each data dir's season folders and current/.
 
     Other folders (e.g. a renamed '114S1.old' backup) are skipped: they would sort
     after the seasons and overwrite newer values. cities: codes (any case) or None for all.
+    season: only that season's folder (no current/).
     """
     wanted = None if cities is None else {c.upper() for c in cities}
     found = []
@@ -62,7 +81,11 @@ def find_b_files(data_dirs: list[Path], cities) -> list[Path]:
             logger.warning("Data dir not found, skipping: %s", data_dir)
             continue
         for path in data_dir.glob("*/*"):
-            if not (SEASON_DIR.match(path.parent.name) or path.parent.name == "current"):
+            folder = path.parent.name
+            if season is not None:
+                if folder != season:
+                    continue
+            elif not (SEASON_DIR.match(folder) or folder == "current"):
                 continue
             m = CSV_PATTERN.match(path.name)
             if not m or m.group(2).lower() != "b":
@@ -71,6 +94,20 @@ def find_b_files(data_dirs: list[Path], cities) -> list[Path]:
                 continue
             found.append(path)
     return sorted(found, key=_order_key)
+
+
+def stale_files(files: list[Path], since: float) -> list[Path]:
+    """Files whose <data_dir>/<season>.zip is missing or older than since (epoch seconds).
+
+    Judged by the zip, not the CSV: run_etl re-extracts the zip on every run, so the
+    CSV mtime is fresh even when the zip is the old download.
+    """
+    stale = []
+    for path in files:
+        zip_path = _season_zip(path)
+        if not zip_path.is_file() or zip_path.stat().st_mtime < since:
+            stale.append(path)
+    return stale
 
 
 def read_updates(csv_path: Path) -> tuple[list[str], list[tuple]]:
@@ -109,7 +146,10 @@ def backfill(files: list[Path], conn, dry_run: bool = False) -> dict:
 
     stats = {"files": 0, "rows_read": 0, "rows_updated": 0}
     for path in files:
-        cols, rows = read_updates(path)
+        try:
+            cols, rows = read_updates(path)
+        except Exception as e:  # pandas parse errors do not name the file
+            raise RuntimeError(f"cannot read {path}: {e}") from e
         if not cols:
             logger.info("%s: no pre-sale columns, skipped", path)
             continue
@@ -136,9 +176,18 @@ def main() -> int:
     parser.add_argument("--city", help="Comma-separated city codes, or 'all'. Defaults to config.TARGET_CITY_CODES.")
     parser.add_argument("--data-dir", action="append", type=Path,
                         help="Folder holding <season>/ and current/ CSVs. Repeatable. Defaults to config.DATA_DIR.")
+    parser.add_argument("--season", help="Only this season (e.g. 115S3); needs --since. Exit 4 if not proven updated.")
+    parser.add_argument("--since", type=int,
+                        help="Epoch seconds taken before re-downloading --season; its zip must be at least this new")
     parser.add_argument("--dry-run", action="store_true", help="Read files and report counts, no DB writes")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+    season = args.season.upper() if args.season is not None else None
+    if (season is None) != (args.since is None):
+        parser.error("--season and --since go together")
+    if season is not None and not SEASON_DIR.match(season):
+        parser.error(f"--season must look like 115S3, got {args.season!r}")
 
     if args.city:
         cities = None if args.city.lower() == "all" else [c.strip() for c in args.city.split(",") if c.strip()]
@@ -146,17 +195,41 @@ def main() -> int:
         cities = config.TARGET_CITY_CODES
     data_dirs = [d.expanduser() for d in (args.data_dir or [config.DATA_DIR])]
 
-    files = find_b_files(data_dirs, cities)
+    files = find_b_files(data_dirs, cities, season)
     logger.info("Found %d b file(s) for cities %s in %s", len(files), cities or "ALL", data_dirs)
+    if not files:  # a wrong --data-dir must not pass as a finished backfill
+        if season is not None:
+            logger.error("Season check failed: no %s b file for cities %s", season, cities or "ALL")
+        else:
+            logger.error("No b file found for cities %s in %s", cities or "ALL", data_dirs)
+        return 4
+    if season is not None:
+        stale = stale_files(files, args.since)
+        for path in stale:
+            logger.error("Season check failed: %s.zip is missing or older than --since; "
+                         "%s is still the old download", path.parent.parent / season, path)
+        if stale:
+            return 4
 
     if args.dry_run:  # reads files only; works without a database
         logger.info("Done (dry run): %s", backfill(files, None, dry_run=True))
         return 0
 
     conn = get_connection()
+    failed = []
     try:
         ensure_schema(conn)
-        stats = backfill(files, conn)
+        if season is None:
+            stats = backfill(files, conn)
+        else:
+            stats = {"files": 0, "rows_read": 0, "rows_updated": 0}
+            for path in files:  # one at a time so each target file's match count is known
+                one = backfill([path], conn)
+                stats = {k: stats[k] + one[k] for k in stats}
+                if one["files"] == 0:  # before 107S1: none of the three columns
+                    failed.append((path, "has no pre-sale columns (season before 107S1?)"))
+                elif one["rows_read"] and one["rows_updated"] == 0:  # header-only file: nothing to prove
+                    failed.append((path, "matched 0 rows (season not imported yet?)"))
     except Exception as e:
         logger.error("Backfill failed: %s", e, exc_info=True)
         conn.rollback()
@@ -165,7 +238,9 @@ def main() -> int:
         conn.close()
 
     logger.info("Done: %s", stats)
-    return 0
+    for path, why in failed:
+        logger.error("Season check failed: %s %s", path, why)
+    return 4 if failed else 0
 
 
 if __name__ == "__main__":

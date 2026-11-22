@@ -220,11 +220,47 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
 
 排程只匯本期檔，匯入後才登記的解約不會回寫；季檔帶的是下載當時最新的解約情形。
 
-1. `<data_dir>/<季>.zip` 存在 → 把它和 `<data_dir>/<季>/` 改名成 `<季>.old.zip`／`<季>.old/` 保留舊版（download.py 看到 zip 就不重抓；backfill 不讀 `.old/`）。
-2. `run --start <季> --end <季>`。季檔已匯過時，upsert 會因 etl_log 已 success 而跳過，屬正常。
-3. `python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code>`：只 UPDATE `project_name`、`building_unit`、`cancel_status`。完成條件：exit 0，且最後一行 `Done:` 的 `rows_updated` > 0。
+`<季>` 早於 112S3 的季檔沒有解約欄，這一段更新不到解約：要補建案照〈回補建案〉，不用重新下載。
 
-`<季>` 還沒公布季檔時第 2 步會失敗（見上一段），等公布後再更新。
+`<data_dir>` 一律是 config.json 的 `data_dir`（`run` 下載的地方）。
+
+0. `date +%s`，記下輸出的數字當 `<T0>`（第 3 步要用；每次 Bash 呼叫的 shell 變數不會留到下一次）。
+1. `<data_dir>/<季>.zip` 存在 → 把它和 `<data_dir>/<季>/` 改名成 `<季>.old-<T0>.zip`／`<季>.old-<T0>/` 保留舊版（download.py 看到 zip 就不重抓；backfill 不讀 `.old-*/`）。名字帶 `<T0>`，上次更新留下的舊版不會被蓋掉或被 `mv` 搬進去。
+2. `run --start <季> --end <季>`。季檔已匯過時，upsert 會因 etl_log 已 success 而跳過，屬正常。
+   exit 3 → 還原後停在這裡：第 2 步留下的 `<季>.zip`／`<季>/`（下載或解壓成功才會有）先改名成 `<季>.failed-<T0>.zip`／`<季>.failed-<T0>/`，再把 `.old-<T0>.zip`／`.old-<T0>/` 改回原名。看 log 回報原因：拿到 HTML 是季檔還沒公布（見上一段，等公布後再更新）；curl 失敗是網路問題，稍後從第 0 步重做；下載成功但每個檔都匯入失敗或目標縣市沒有資料，就附上 log 回報。有 `.failed-<T0>` 時一併告訴使用者路徑，要留著查原因或刪掉由使用者決定。
+3. 回補（只改 `project_name`、`building_unit`、`cancel_status` 三欄）：
+   ```bash
+   python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code> --data-dir <data_dir> --season <季> --since <T0>
+   ```
+   完成條件：**exit 0**（`--season` 只讀 `<data_dir>/<季>/`）。之後告訴使用者 `<季>.old-<T0>.zip`／`<季>.old-<T0>/` 的路徑：要留著比對或刪掉由使用者決定。
+   exit 4 → 看 log 的 `Season check failed` 行，照原字串判讀：
+   - `no <季> b file`：`--data-dir`／`--city` 給錯，或第 2 步沒解出檔。
+   - `is missing or older than --since`：zip 不存在或還是舊的，通常是第 1 步沒做 → 從第 0 步重做。
+   - `matched 0 rows`：回頭查第 2 步有沒有匯入。
+   - `has no pre-sale columns`：107S1 以前的季，沒有可更新的欄位。
+
+   修不好就回報「未更新」並附上那一行。
+   排程從 `current/` 匯入的列也會更新：比對靠 `serial_no`，不必讀排程的資料夾。
+
+### 回補建案（`建案` 是 NULL）
+
+讀所有季檔和 `current/`，補 DB 升級前匯入的列。資料夾要涵蓋**所有匯入過資料的地方**，每個帶一次 `--data-dir`：
+
+1. config.json 的 `data_dir`。
+2. 有排程時，排程用的資料夾。讀 `~/Library/LaunchAgents/com.tw-realestate.etl.plist`（不存在就只用第 1 項）：
+   - `ProgramArguments` 的 `run_etl.py` 在 `~/.claude/skills/tw-realestate-etl/` 底下 → 排程用的就是第 1 項，不必再加。
+   - 在別處（repo 版排程，例：Mac mini 的 `~/TonyUtility/TW_RealEstate_ETL/scripts/run_etl.py`）→ 依序取第一個有設的：該 repo 根目錄 `config.json` 的 `data_dir`；plist `EnvironmentVariables` 的 `REALPRICE_DATA_DIR`；repo `.env` 的 `REALPRICE_DATA_DIR`；都沒有就是 `<repo>/data`。前三者是相對路徑時，以 plist 的 `WorkingDirectory` 為準。
+3. 其他手動跑過 `run_etl.py` 的 repo 的資料夾（判法同第 2 項的 `config.json`／`.env`／`<repo>/data`）；不確定有沒有就問使用者。
+
+`--data-dir` 的順序不影響結果（同一季以最新下載的 zip 為準）。
+
+```bash
+python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <縣市清單> --data-dir <第 1 項> [--data-dir <第 2、3 項>…]
+```
+
+`<縣市清單>`：config.json 的 `target_cities`，加上 plist `ProgramArguments` 裡 `--city` 後面的縣市，取聯集、逗號分隔（例：Mac mini 的 config 只有 `D`、排程跑 `D,J,O` → `D,J,O`）。不要帶 `all`：有些沒匯入過的縣市的舊季檔讀不進來（例：110S4 的 `f_`／`b_lvr_land_b.csv`），會在那裡 exit 1，排在後面的季和 `current/` 都補不到。
+
+完成條件：exit 0。exit 1 → log 的 `Backfill failed: cannot read <檔>` 是讀不進來的檔，把那個縣市從清單拿掉再跑，並回報那個檔。exit 4 且 log 有 `No b file found` → 資料夾給錯或這台沒下載過，回頭查上面的清單。這段補的是缺的欄位；要拿到最新的解約情形，照上一段〈更新解約情形〉。
 
 ---
 
@@ -332,7 +368,7 @@ ORDER BY transaction_date_ad DESC;
 
 **預設排除已解約**（`AND cancel_status IS NULL`）；使用者要看解約就拿掉這一行。
 `cancel_status` 是 NULL 不保證未解約：解約是事後登記的，排程匯入後才解約的列仍是 NULL，越接近下載時點的季越不準。回覆要註明：112S3 以前沒有解約紀錄；近期的 NULL 可能是事後才解約、還沒更新（更新方式見〈操作 2: run〉〈更新解約情形〉）。
-`建案` 是 NULL 的那一組，是 107S1 以前、或 DB 升級前匯入還沒回補的列；出現時提示使用者跑〈更新解約情形〉第 3 步的 backfill 指令補。
+`建案` 是 NULL 的那一組：查詢範圍在 107S1 以後還出現，就提示使用者照〈操作 2: run〉〈回補建案〉補（107S1 以前的季檔本來就沒有這一欄）。
 
 ```sql
 SELECT

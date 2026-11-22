@@ -158,13 +158,19 @@ python scripts/delete.py --start 113S2 --end 113S2 --city A
 ### 回補預售屋建案名稱
 
 既有 DB 升級後（`run_etl.py` 開頭會檢查，缺欄才自動 `ALTER TABLE … ADD COLUMN`），舊的預售屋列沒有 `project_name`／`building_unit`／`cancel_status`。
-用本機已下載的 b 檔補上（不下載、只 UPDATE 這三欄、不新增列；只讀季別資料夾如 `114S1/` 與 `current/`，其他資料夾如 `114S1.old/` 略過；同一筆在多個檔出現時以最新季、最新 current 為準）：
+用本機已下載的 b 檔補上（不下載、只 UPDATE 這三欄、不新增列；只讀季別資料夾如 `114S1/` 與 `current/`，其他資料夾如 `114S1.old/` 略過；同一筆在多個檔出現時以最新季、最新 current 為準；同一季在多個 `--data-dir` 都有時，以 `<季>.zip` 較新的為準）：
 
 ```bash
-# 預設讀 config.DATA_DIR；--data-dir 可重複，--dry-run 只讀檔不寫 DB
+# 預設讀 config.DATA_DIR；--data-dir 可重複，--dry-run 只讀檔不寫 DB；一個 b 檔都沒找到 → exit 4
 python scripts/backfill_presale.py --city D,J,O
 python scripts/backfill_presale.py --city D,J,O --data-dir data --data-dir ~/.claude/skills/tw-realestate-etl/data
+
+# 重新下載某一季後只套那一季，並證明換到新檔：--since 填改名舊 zip 前的 `date +%s`
+# exit 4：找不到目標季的檔、<季>.zip 比 --since 舊（還是舊下載）、沒有預售欄位（107S1 以前）、或有資料列卻對到 0 列（只有表頭的檔不算）
+python scripts/backfill_presale.py --city D --data-dir data --season 115S3 --since 1763800000
 ```
+
+`--season` 看的是 `<季>.zip` 的 mtime，不是 CSV：`run_etl.py` 每次都會重新解壓，CSV 的 mtime 永遠是新的。
 
 ### 啟用排程（macOS LaunchAgent）
 
