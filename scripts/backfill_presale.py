@@ -146,11 +146,14 @@ def main() -> int:
     files = find_b_files(data_dirs, cities)
     logger.info("Found %d b file(s) for cities %s in %s", len(files), cities or "ALL", data_dirs)
 
+    if args.dry_run:  # reads files only; works without a database
+        logger.info("Done (dry run): %s", backfill(files, None, dry_run=True))
+        return 0
+
     conn = get_connection()
     try:
-        if not args.dry_run:
-            ensure_schema(conn)
-        stats = backfill(files, conn, dry_run=args.dry_run)
+        ensure_schema(conn)
+        stats = backfill(files, conn)
     except Exception as e:
         logger.error("Backfill failed: %s", e, exc_info=True)
         conn.rollback()

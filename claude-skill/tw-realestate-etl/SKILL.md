@@ -321,6 +321,7 @@ ORDER BY transaction_date_ad DESC;
 #### SQL 範例 — 預售屋依建案名稱分組
 
 **預設排除已解約**（`AND cancel_status IS NULL`）；使用者要看解約就拿掉這一行。時間範圍早於 112S3 時，回覆要註明那段期間沒有解約紀錄。
+解約是事後才登記的：排程只匯本期檔，匯入後才解約的列 `cancel_status` 仍是 NULL，所以**近一兩季的 NULL 不保證未解約**，回覆要註明。要更新：該季季檔還沒匯過就 `run --start <季> --end <季>`（季檔帶最新解約情形）；已匯過的季檔在 data 目錄裡，跑 `backfill_presale.py --city <city_code>` 只更新這三欄。
 `建案` 是 NULL 的那一組，是 107S1 以前、或 DB 升級前匯入還沒回補的列；出現時提示使用者跑 `python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code>` 補。
 
 ```sql

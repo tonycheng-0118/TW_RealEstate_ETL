@@ -13,6 +13,7 @@ DB tests run against TEMP tables (they shadow public.transactions for the sessio
 and are skipped when PostgreSQL is unreachable.
 """
 
+import logging
 import os
 import re
 import sys
@@ -198,6 +199,45 @@ def test_ensure_schema_is_rerunnable(temp_db):
     assert _row(temp_db, "nope") is None
 
 
+class _RecordingConn:
+    """Wrap a connection and record every SQL statement its cursors execute."""
+
+    def __init__(self, conn):
+        self.conn, self.sql = conn, []
+
+    def commit(self):
+        self.conn.commit()
+
+    def cursor(self):
+        outer, cur = self, self.conn.cursor()
+
+        class Cur:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                cur.close()
+
+            def execute(self, sql, params=None):
+                outer.sql.append(sql)
+                cur.execute(sql, params)
+
+            def fetchone(self):
+                return cur.fetchone()
+
+            def fetchall(self):
+                return cur.fetchall()
+
+        return Cur()
+
+
+def test_ensure_schema_skips_alter_when_columns_exist(temp_db):
+    load.ensure_schema(temp_db)
+    rec = _RecordingConn(temp_db)
+    load.ensure_schema(rec)
+    assert rec.sql and not any("ALTER" in s for s in rec.sql)  # no ACCESS EXCLUSIVE lock on every run
+
+
 def test_ensure_schema_skips_missing_table(temp_db):
     with temp_db.cursor() as cur:
         cur.execute("DROP TABLE pg_temp.transactions")
@@ -224,6 +264,31 @@ def test_backfill_fills_new_columns_without_touching_others(temp_db, tmp_path):
         cur.execute("SELECT count(*) FROM transactions")
         assert cur.fetchone()[0] == 2  # UPDATE only, never inserts
     assert stats == {"files": 2, "rows_read": 4, "rows_updated": 2}
+
+
+def test_backfill_counts_rows_across_pages(temp_db, tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "BATCH_SIZE", 1)
+    load.ensure_schema(temp_db)
+    with temp_db.cursor() as cur:
+        cur.execute("INSERT INTO transactions (serial_no) VALUES "
+                    "('RPPNMLMKIILGFCJ97CB'), ('RPPNMLSKKIIGFDJ58CB')")
+    f = _fixture_as(tmp_path / "115S1", "j_lvr_land_b_115.csv", "j_lvr_land_b.csv")
+
+    assert backfill_presale.backfill([f], temp_db)["rows_updated"] == 2
+
+
+def test_dry_run_never_connects(tmp_path, monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    _fixture_as(tmp_path / "115S1", "j_lvr_land_b_115.csv", "j_lvr_land_b.csv")
+
+    def no_db():
+        raise AssertionError("dry run must not connect")
+
+    monkeypatch.setattr(backfill_presale, "get_connection", no_db)
+    monkeypatch.setattr(sys, "argv", ["backfill_presale.py", "--city", "J", "--data-dir", str(tmp_path), "--dry-run"])
+
+    assert backfill_presale.main() == 0
+    assert "'rows_read': 2" in caplog.text
 
 
 def test_backfill_older_file_does_not_clear_cancel_status(temp_db, tmp_path):

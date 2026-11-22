@@ -80,11 +80,20 @@ def ensure_schema(conn) -> None:
     """Add TRANSACTION_ADDED_COLUMNS to an existing transactions table.
 
     Idempotent. Skips silently when the table does not exist yet (schema.sql
-    creates it with the columns).
+    creates it with the columns). Only ALTERs when a column is missing: ALTER
+    TABLE takes an ACCESS EXCLUSIVE lock even when IF NOT EXISTS makes it a no-op.
     """
     with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass('transactions')")
+        if cur.fetchone()[0] is None:
+            conn.commit()
+            return
+        cur.execute("SELECT attname FROM pg_attribute WHERE attrelid = 'transactions'::regclass "
+                    "AND attnum > 0 AND NOT attisdropped")
+        existing = {row[0] for row in cur.fetchall()}
         for col, col_type in TRANSACTION_ADDED_COLUMNS.items():
-            cur.execute(f"ALTER TABLE IF EXISTS transactions ADD COLUMN IF NOT EXISTS {col} {col_type}")
+            if col not in existing:
+                cur.execute(f"ALTER TABLE IF EXISTS transactions ADD COLUMN IF NOT EXISTS {col} {col_type}")
     conn.commit()
 
 
