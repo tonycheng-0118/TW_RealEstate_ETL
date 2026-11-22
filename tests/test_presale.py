@@ -428,3 +428,17 @@ def test_season_exit_depends_on_target_file_matching(temp_db, tmp_path, monkeypa
     assert backfill_presale.main() == expected_exit
     if serials:
         assert _row(temp_db, "RPPNMLSKKIIGFDJ58CB")[4] == "1130116全部解約"
+
+
+def test_season_header_only_file_is_not_unmatched(temp_db, tmp_path, monkeypatch):
+    # A small county can have no pre-sale deals in a season: the b file is just the two
+    # header lines. Nothing to update is not a failed update (pr-verifier observation, PR #9).
+    load.ensure_schema(temp_db)
+    lines = (FIXTURES / "j_lvr_land_b_115.csv").read_bytes().splitlines(keepends=True)
+    (tmp_path / "115S3").mkdir()
+    (tmp_path / "115S3" / "j_lvr_land_b.csv").write_bytes(b"".join(lines[:2]))
+    _touch(tmp_path / "115S3.zip", 2000)
+    monkeypatch.setattr(backfill_presale, "get_connection", lambda: _KeepOpen(temp_db))
+    monkeypatch.setattr(sys, "argv", _season_argv(tmp_path, "--season", "115S3", "--since", "1000"))
+
+    assert backfill_presale.main() == 0

@@ -208,7 +208,7 @@ def main() -> int:
             for path in files:  # one at a time so each target file's match count is known
                 one = backfill([path], conn)
                 stats = {k: stats[k] + one[k] for k in stats}
-                if one["rows_updated"] == 0:
+                if one["rows_read"] and one["rows_updated"] == 0:  # header-only file: nothing to prove
                     unmatched.append(path)
     except Exception as e:
         logger.error("Backfill failed: %s", e, exc_info=True)
