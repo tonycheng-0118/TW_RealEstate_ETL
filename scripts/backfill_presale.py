@@ -42,7 +42,7 @@ SEASON_DIR = re.compile(r"^(\d{3})S([1-4])$")
 
 
 def _order_key(path: Path) -> tuple:
-    """Seasons ascending, then current/ (and any other dir) by file mtime."""
+    """Seasons ascending, then current/ releases by file mtime."""
     m = SEASON_DIR.match(path.parent.name)
     if m:
         return (0, int(m.group(1)), int(m.group(2)), 0.0)
@@ -50,9 +50,10 @@ def _order_key(path: Path) -> tuple:
 
 
 def find_b_files(data_dirs: list[Path], cities) -> list[Path]:
-    """List <city>_lvr_land_b.csv one level under each data dir (season dirs, current/).
+    """List <city>_lvr_land_b.csv in each data dir's season folders and current/.
 
-    cities: list of city codes (any case), or None for every city.
+    Other folders (e.g. a renamed '114S1.old' backup) are skipped: they would sort
+    after the seasons and overwrite newer values. cities: codes (any case) or None for all.
     """
     wanted = None if cities is None else {c.upper() for c in cities}
     found = []
@@ -61,6 +62,8 @@ def find_b_files(data_dirs: list[Path], cities) -> list[Path]:
             logger.warning("Data dir not found, skipping: %s", data_dir)
             continue
         for path in data_dir.glob("*/*"):
+            if not (SEASON_DIR.match(path.parent.name) or path.parent.name == "current"):
+                continue
             m = CSV_PATTERN.match(path.name)
             if not m or m.group(2).lower() != "b":
                 continue

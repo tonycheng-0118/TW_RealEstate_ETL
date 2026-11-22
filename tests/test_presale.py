@@ -124,6 +124,8 @@ def test_find_b_files_orders_seasons_then_current_and_filters_cities(tmp_path):
     _touch(repo / "114S4" / "a_lvr_land_b.csv", 100)
     _touch(skill / "101S1" / "o_lvr_land_b.csv", 50)
     _touch(skill / "current" / "o_lvr_land_b.csv", 150)  # older current release goes first
+    _touch(repo / "114S4.old" / "j_lvr_land_b.csv", 999)  # renamed backup must never be read
+    _touch(repo / "tmp" / "j_lvr_land_b.csv", 999)
     (repo / "114S4.zip").write_text("zip")
 
     found = backfill_presale.find_b_files([repo, skill], ["J", "O"])
