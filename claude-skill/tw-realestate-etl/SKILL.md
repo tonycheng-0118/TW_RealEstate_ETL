@@ -57,12 +57,12 @@ CONFIG_FILE=$SKILL_ROOT/config.json
    REALPRICE_TARGET_CITIES=<target_cities joined by comma> \
    ```
 
-4. 要跑 Python 腳本的操作（run、backup）先確認 `<python_path>` 裝好了套件：
+4. run、backup、schedule install 先確認 `<python_path>` 裝好了套件：
    ```bash
    <python_path> -c 'import pandas, psycopg2, dotenv'
    ```
-   失敗（沒有這個檔或 `ModuleNotFoundError`）→ 照〈操作 1: init〉Step 2 建 `.venv`，再把 config.json 的 `python_path` 改成 `~/.claude/skills/tw-realestate-etl/.venv/bin/python`。
-   下文的 `<python_path>` 一律照 config.json 原字串（`~` 開頭可以直接當指令），不要換成 `python3`：系統 Python 多半沒裝 pandas。
+   exit 非 0（含 config.json 沒有 `python_path`）→ 照〈操作 1: init〉Step 2 建 `.venv`，把 `python_path` 改成 `~/.claude/skills/tw-realestate-etl/.venv/bin/python`，重跑上面的指令，exit 0 才往下。
+   Bash 指令裡的 `<python_path>` 照 config.json 原字串（`~` 開頭可直接當指令；plist 例外，見〈schedule install〉第 2 步）。系統 python3 多半沒裝 pandas。
 
 ---
 
@@ -126,14 +126,16 @@ which python3 && which psql && which pg_dump && which curl
 
 ### Step 2: 安裝 Python 依賴
 
-套件裝在 skill 自己的 `.venv`，不裝進系統 Python（Homebrew 的 Python 不讓 `pip install`）：
+套件裝在 skill 自己的 `.venv`（Homebrew 的 Python 擋 `pip install`，PEP 668）：
 
-```bash
-python3 --version
-python3 -m venv ~/.claude/skills/tw-realestate-etl/.venv && ~/.claude/skills/tw-realestate-etl/.venv/bin/pip install -r ~/.claude/skills/tw-realestate-etl/scripts/requirements.txt
-```
+1. `python3 --version`：3.12–3.14 就用 `python3` 當 `<py>`；3.15 以上改用 `python3.14`（沒有就 `brew install python@3.14`）。`requirements.txt` 釘的 pandas==3.0.1 沒有 3.15 的 wheel，`pip install` 會失敗。
+2. 已有 `~/.claude/skills/tw-realestate-etl/.venv` 且它的 `bin/python --version` 是 3.15 以上 → 先 `rm -rf` 它。
+3. 建 venv、裝套件：
+   ```bash
+   <py> -m venv ~/.claude/skills/tw-realestate-etl/.venv && ~/.claude/skills/tw-realestate-etl/.venv/bin/pip install -r ~/.claude/skills/tw-realestate-etl/scripts/requirements.txt
+   ```
 
-`python3 --version` 是 3.15 以上時，`requirements.txt` 的 pandas 沒有預先編好的 wheel、`pip install` 會失敗：改用 `python3.14 -m venv …`（沒有就 `brew install python@3.14`）。已有 `.venv` 但版本不對就先刪掉再建。
+完成條件：`~/.claude/skills/tw-realestate-etl/.venv/bin/python -c 'import pandas, psycopg2, dotenv'` exit 0。
 
 ### Step 3: 互動問答
 
@@ -497,32 +499,30 @@ REALPRICE_BACKUP_KEEP_COUNT=<backup_keep_count> \
 
 ### schedule install
 
-1. 讀取 config.json 取得 `python_path`，先照〈前置檢查〉第 4 步確認它裝好了套件
-
-2. 讀取 plist 模板：
+1. 讀取 plist 模板：
    ```bash
    cat ~/.claude/skills/tw-realestate-etl/launchd/com.tw-realestate.etl.plist
    ```
 
-3. 用 Write 工具產生新的 plist，替換模板中的路徑：
-   - `/path/to/TW_RealEstate_ETL/.venv/bin/python` → `<python_path>`（展開為絕對路徑：launchd 不展開 `~`）
-   - `/path/to/TW_RealEstate_ETL/scripts/run_etl.py` → `~/.claude/skills/tw-realestate-etl/scripts/run_etl.py`（展開為絕對路徑）
-   - `/path/to/TW_RealEstate_ETL` (WorkingDirectory) → `~/.claude/skills/tw-realestate-etl`（展開為絕對路徑）
-   - `/path/to/TW_RealEstate_ETL/logs/` → `~/.claude/skills/tw-realestate-etl/logs/`（展開為絕對路徑）
+2. 用 Write 工具產生新的 plist，替換模板中的路徑（以下路徑都展開為絕對路徑：launchd 不展開 `~`）：
+   - `/path/to/TW_RealEstate_ETL/.venv/bin/python` → `<python_path>`
+   - `/path/to/TW_RealEstate_ETL/scripts/run_etl.py` → `~/.claude/skills/tw-realestate-etl/scripts/run_etl.py`
+   - `/path/to/TW_RealEstate_ETL` (WorkingDirectory) → `~/.claude/skills/tw-realestate-etl`
+   - `/path/to/TW_RealEstate_ETL/logs/` → `~/.claude/skills/tw-realestate-etl/logs/`
    - 加入 `<key>EnvironmentVariables</key>` 區段，嵌入所有 `REALPRICE_*` 環境變數
    - 使用者指定 city 時，`ProgramArguments` 末尾加 `<string>--city</string><string><city></string>`；沒指定就靠 `REALPRICE_TARGET_CITIES`
 
-4. 寫入：
+3. 寫入：
    ```bash
    # Write 工具寫到 ~/Library/LaunchAgents/com.tw-realestate.etl.plist
    ```
 
-5. 載入：
+4. 載入：
    ```bash
    launchctl load ~/Library/LaunchAgents/com.tw-realestate.etl.plist
    ```
 
-6. 回報安裝成功，顯示排程時間（每月 2、12、22 日 03:00）。
+5. 回報安裝成功，顯示排程時間（每月 2、12、22 日 03:00）。
 
 ### schedule uninstall
 
