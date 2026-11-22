@@ -76,6 +76,11 @@ CREATE TABLE IF NOT EXISTS transactions (
     transfer_no         TEXT,           -- 移轉編號
     note                TEXT,           -- 備註
 
+    -- 預售屋 (Pre-sale only; NULL for 買賣 rows and b files before 107S1/112S3)
+    project_name        TEXT,           -- 建案名稱
+    building_unit       TEXT,           -- 棟及號
+    cancel_status       TEXT,           -- 解約情形 e.g. 1130116全部解約 (NULL = 未解約)
+
     -- ETL metadata
     source_file         TEXT,           -- 來源檔名 e.g. d_lvr_land_a.csv
     source_season       TEXT,           -- 季度 e.g. 113S4
@@ -85,6 +90,12 @@ CREATE TABLE IF NOT EXISTS transactions (
 
     CONSTRAINT uq_txn_serial_no UNIQUE (serial_no)
 );
+
+-- Migration for tables created before the pre-sale columns existed
+-- (load.ensure_schema() runs the same statements at the start of every ETL run).
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS project_name TEXT;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS building_unit TEXT;
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS cancel_status TEXT;
 
 -- Trigger for auto-updating updated_at
 DROP TRIGGER IF EXISTS trg_transactions_updated_at ON transactions;

@@ -318,6 +318,32 @@ WHERE city_code = '<city_code>'
 ORDER BY transaction_date_ad DESC;
 ```
 
+#### SQL 範例 — 預售屋依建案名稱分組
+
+預售屋列的 `source_file` 是 `<城市>_lvr_land_b.csv`。`project_name`／`building_unit` 自 107S1 起才有、`cancel_status` 自 112S3 起才有，更早的列是 NULL。
+`cancel_status` 有值（如 `1130116全部解約`）就是已解約，**預設排除**；使用者要看解約時再拿掉這行。
+
+```sql
+SELECT
+    project_name AS 建案,
+    COUNT(*) AS 筆數,
+    MIN(transaction_date_ad) AS 最早,
+    MAX(transaction_date_ad) AS 最新,
+    ROUND(AVG(unit_price * 3.30579)) AS 均單價_坪,
+    ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY total_price) / 10000) AS 總價中位數_萬,
+    MIN(address) AS 門牌範例
+FROM transactions
+WHERE city_code = '<city_code>'
+  AND district = '<district>'
+  AND source_file LIKE '%\_b.csv'
+  AND transaction_date_ad >= CURRENT_DATE - INTERVAL '1 year'
+  AND cancel_status IS NULL
+GROUP BY project_name
+ORDER BY 筆數 DESC;
+```
+
+同一路段多個建案：加 `AND address LIKE '%<路段>%'`；看單一建案逐戶成交：`WHERE project_name = '<建案>'`、SELECT 加 `building_unit AS 棟及號`。
+
 #### SQL 範例 — 租金行情
 
 ```sql
@@ -474,6 +500,9 @@ ls -la ~/Library/LaunchAgents/com.tw-realestate.etl.plist 2>/dev/null
 | parking_price | BIGINT | 車位總價 (元) |
 | serial_no | TEXT | 編號 (唯一鍵) |
 | note | TEXT | 備註 |
+| project_name | TEXT | 建案名稱（預售屋；107S1 起） |
+| building_unit | TEXT | 棟及號（預售屋；107S1 起） |
+| cancel_status | TEXT | 解約情形（預售屋；112S3 起，NULL＝未解約） |
 | source_season | TEXT | 資料季度 |
 | city_code | CHAR(1) | 縣市代碼 |
 

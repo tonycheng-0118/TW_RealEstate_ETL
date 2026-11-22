@@ -161,8 +161,14 @@ COLUMN_MAP_A = {
     "移轉編號": "transfer_no",
 }
 
-# 預售屋 (b) uses the same mapping as 買賣 (a).
-COLUMN_MAP_B = COLUMN_MAP_A.copy()
+# 預售屋 (b) = 買賣 (a) + pre-sale-only columns. 建案名稱/棟及號 appear from 107S1,
+# 解約情形 from 112S3; older files lack them and load as NULL.
+COLUMN_MAP_B = {
+    **COLUMN_MAP_A,
+    "建案名稱": "project_name",
+    "棟及號": "building_unit",
+    "解約情形": "cancel_status",  # e.g. "1130116全部解約"; empty = not cancelled
+}
 
 # 租賃 (c) — rental CSVs use different Chinese headers from sales CSVs.
 # Key differences: 租賃年月日 (not 交易年月日), 租賃筆棟數 (not 交易筆棟數),

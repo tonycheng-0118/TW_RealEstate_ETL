@@ -21,6 +21,7 @@ cp scripts/load.py "$DIST/scripts/"
 cp scripts/backup.py "$DIST/scripts/"
 cp scripts/run_etl.py "$DIST/scripts/"
 cp scripts/delete.py "$DIST/scripts/"
+cp scripts/backfill_presale.py "$DIST/scripts/"
 cp scripts/season_utils.py "$DIST/scripts/"
 
 # Config module — copied from project root INTO scripts/ for skill layout.
