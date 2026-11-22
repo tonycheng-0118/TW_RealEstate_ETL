@@ -225,14 +225,14 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
 0. `date +%s`，記下輸出的數字當 `<T0>`（第 3 步要用；每次 Bash 呼叫的 shell 變數不會留到下一次）。
 1. `<data_dir>/<季>.zip` 存在 → 把它和 `<data_dir>/<季>/` 改名成 `<季>.old.zip`／`<季>.old/` 保留舊版（download.py 看到 zip 就不重抓；backfill 不讀 `.old/`）。
 2. `run --start <季> --end <季>`。季檔已匯過時，upsert 會因 etl_log 已 success 而跳過，屬正常。
-3. 只 UPDATE `project_name`、`building_unit`、`cancel_status`：
+   exit 3（季檔還沒公布，見上一段）→ 把第 1 步改名的 `.old.zip`／`.old/` 改回原名，停在這裡，回報等公布後再更新。
+3. 回補（只改 `project_name`、`building_unit`、`cancel_status` 三欄）：
    ```bash
    python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code> --data-dir <data_dir> --season <季> --since <T0>
    ```
-   完成條件：**exit 0**。`--season` 只讀 `<data_dir>/<季>/`，並由腳本檢查：`<data_dir>/<季>.zip` 是 `<T0>` 之後下載的、目標季每個 b 檔都對到至少 1 列；任一不成立就 exit 4，log 的 `Season check failed` 行說明原因（例：第 1 步沒做，zip 還是舊的）。exit 4 時不要回報已更新。
+   完成條件：**exit 0**（腳本自己驗 `<data_dir>/<季>.zip` 比 `<T0>` 新、目標季每個 b 檔都對到列；`--season` 只讀 `<data_dir>/<季>/`）。
+   exit 4 → 看 log 的 `Season check failed` 行：zip 太舊（第 1 步沒做）就從第 0 步重做；matched 0 就回頭查第 2 步有沒有匯入。修不好就回報「未更新」並附上那一行。
    排程從 `current/` 匯入的列也會更新：比對靠 `serial_no`，不必讀排程的資料夾。
-
-`<季>` 還沒公布季檔時第 2 步會失敗（見上一段），等公布後再更新。
 
 ### 回補建案（`建案` 是 NULL）
 
@@ -242,12 +242,13 @@ python3 ~/.claude/skills/tw-realestate-etl/scripts/run_etl.py <flags>
 2. 有排程時，排程用的資料夾。讀 `~/Library/LaunchAgents/com.tw-realestate.etl.plist`（不存在就只用第 1 項）：
    - `ProgramArguments` 的 `run_etl.py` 在 `~/.claude/skills/tw-realestate-etl/` 底下 → 排程用的就是第 1 項，不必再加。
    - 在別處（repo 版排程，例：Mac mini 的 `~/TonyUtility/TW_RealEstate_ETL/scripts/run_etl.py`）→ `EnvironmentVariables` 有 `REALPRICE_DATA_DIR` 就用它；沒有就看該 repo 的 `.env` 有沒有設 `REALPRICE_DATA_DIR`（相對路徑以 plist 的 `WorkingDirectory` 為準）；都沒有就是 `<repo>/data`。
+3. 其他手動跑過 `run_etl.py` 的 repo 的資料夾（判法同第 2 項的 `.env`／`<repo>/data`）；不確定有沒有就問使用者。
 
 ```bash
-python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code> --data-dir <第 1 項> [--data-dir <第 2 項>]
+python3 ~/.claude/skills/tw-realestate-etl/scripts/backfill_presale.py --city <city_code> --data-dir <第 1 項> [--data-dir <第 2、3 項>…]
 ```
 
-完成條件：exit 0。這裡不檢查是否換了新檔（只補欄位，不是更新解約）；要更新解約照上一段。
+完成條件：exit 0。這段補的是缺的欄位；要拿到最新的解約情形，照上一段〈更新解約情形〉。
 
 ---
 
@@ -355,7 +356,7 @@ ORDER BY transaction_date_ad DESC;
 
 **預設排除已解約**（`AND cancel_status IS NULL`）；使用者要看解約就拿掉這一行。
 `cancel_status` 是 NULL 不保證未解約：解約是事後登記的，排程匯入後才解約的列仍是 NULL，越接近下載時點的季越不準。回覆要註明：112S3 以前沒有解約紀錄；近期的 NULL 可能是事後才解約、還沒更新（更新方式見〈操作 2: run〉〈更新解約情形〉）。
-`建案` 是 NULL 的那一組，是 107S1 以前、或 DB 升級前匯入還沒回補的列；出現時提示使用者照〈操作 2: run〉〈回補建案〉補。
+`建案` 是 NULL 的那一組：查詢範圍在 107S1 以後還出現，就提示使用者照〈操作 2: run〉〈回補建案〉補（107S1 以前的季檔本來就沒有這一欄）。
 
 ```sql
 SELECT
